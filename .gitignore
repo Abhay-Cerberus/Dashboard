@@ -1,0 +1,16 @@
+# virtual environments
+env/
+venv/
+
+
+# VS Code and Pytest cache
+.vscode/
+.pytest_cache/
+__pycache__/
+
+
+# DB
+dashboard.db
+
+# Design Doc
+Personal News & Gaming Dashboard - Design Document.pdf
