@@ -72,7 +72,7 @@ jobs:
         chmod +x release/PersonalDashboard-macOS
         
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: PersonalDashboard-${{ runner.os }}
         path: release/
@@ -84,7 +84,7 @@ jobs:
     
     steps:
     - name: Download all artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       
     - name: Create Release
       uses: softprops/action-gh-release@v1
