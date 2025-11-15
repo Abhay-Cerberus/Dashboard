@@ -1,0 +1,62 @@
+# -*- mode: python ; coding: utf-8 -*-
+
+a = Analysis(
+    ['main.py'],
+    pathex=[],
+    binaries=[],
+    datas=[('modules', 'modules')],
+    hiddenimports=[
+        'feedparser',
+        'feedparser.api',
+        'feedparser.datetimes',
+        'feedparser.exceptions',
+        'feedparser.handlers',
+        'feedparser.mixin',
+        'feedparser.namespaces',
+        'feedparser.sanitizer',
+        'feedparser.urls',
+        'feedparser.util',
+        'google.generativeai',
+        'google.ai.generativelanguage',
+        'pystray',
+        'PIL',
+        'PIL.Image',
+        'PIL.ImageDraw',
+        'schedule',
+        'requests',
+        'sqlite3',
+        'tkinter',
+        'tkinter.ttk',
+        'tkinter.messagebox',
+        'tkinter.filedialog',
+        'tkinter.scrolledtext'
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.datas,
+    [],
+    name='PersonalDashboard',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+)

@@ -14,3 +14,7 @@ dashboard.db
 
 # Design Doc
 Personal News & Gaming Dashboard - Design Document.pdf
+
+# Build
+build/
+dist/
