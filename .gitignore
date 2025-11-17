@@ -1,20 +1,53 @@
-# virtual environments
+# Virtual environments
 env/
 venv/
+.env
 
-
-# VS Code and Pytest cache
+# IDE and cache files
 .vscode/
+.idea/
 .pytest_cache/
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
 
-
-# DB
+# Database files
 dashboard.db
+*.db
+*.sqlite
+*.sqlite3
 
-# Design Doc
+# Design documents and personal files
 Personal News & Gaming Dashboard - Design Document.pdf
+*.pdf
 
-# Build
+# Build and distribution
 build/
 dist/
+*.egg-info/
+*.spec.bak
+
+# Logs
+*.log
+logs/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.cache/
+
+# PyInstaller
+*.manifest
+*.spec.bak

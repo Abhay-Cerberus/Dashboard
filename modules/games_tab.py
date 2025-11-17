@@ -3,426 +3,641 @@ Game Library Tab
 Handles Steam and Epic Games library management
 """
 
-import tkinter as tk
-from tkinter import ttk, messagebox
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
+                            QTreeWidget, QTreeWidgetItem, QTextEdit, QLineEdit,
+                            QMessageBox, QTabWidget, QFrame, QGroupBox, QLabel, 
+                            QProgressBar, QComboBox, QCheckBox)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QFont, QColor
+
+
+def show_toast(parent, message):
+    """Show a simple status message in the status bar instead of toast to avoid threading issues"""
+    try:
+        # Use the main_window reference from the parent tab
+        if hasattr(parent, 'main_window') and hasattr(parent.main_window, 'show_success_message'):
+            parent.main_window.show_success_message(message)
+        else:
+            print(f"Status: {message}")  # Fallback to console
+    except Exception as e:
+        print(f"Status: {message}")  # Fallback to console
 import threading
 import subprocess
 import requests
 import random
 import json
 import logging
+import webbrowser
 from datetime import datetime
 
-class GamesTab:
-    def __init__(self, parent, db):
-        self.parent = parent
-        self.db = db
-        
-        self.frame = ttk.Frame(parent)
-        self.create_widgets()
-        self.load_games()
+class GamesTab(QWidget):
+    # Signals for thread-safe UI updates
+    update_import_status = pyqtSignal(str)
+    show_import_status = pyqtSignal()
+    hide_import_status = pyqtSignal()
     
-    def create_widgets(self):
-        """Create the games tab widgets"""
-        # Main container
-        main_frame = ttk.Frame(self.frame)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+    def __init__(self, db, main_window):
+        super().__init__()
+        self.db = db
+        self.main_window = main_window
+        self.setup_ui()
+        self.load_games()
+        
+        # Connect signals to slots
+        self.update_import_status.connect(self._update_import_status_slot)
+        self.show_import_status.connect(self._show_import_status_slot)
+        self.hide_import_status.connect(self._hide_import_status_slot)
+    
+    def _update_import_status_slot(self, text):
+        """Slot to update import status label text"""
+        self.import_status_label.setText(text)
+        self.import_status_label.setVisible(True)
+    
+    def _show_import_status_slot(self):
+        """Slot to show import status label"""
+        self.import_status_label.setVisible(True)
+    
+    def _hide_import_status_slot(self):
+        """Slot to hide import status label"""
+        self.import_status_label.setVisible(False)
+    
+    def setup_ui(self):
+        """Create the modern PyQt games tab UI"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        # Apply modern styling
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #3c3c3c;
+                color: #ffffff;
+            }
+            QPushButton {
+                background-color: #0078d4;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-weight: bold;
+                min-width: 120px;
+            }
+            QPushButton:hover {
+                background-color: #106ebe;
+            }
+            QPushButton:pressed {
+                background-color: #005a9e;
+            }
+            QPushButton.danger {
+                background-color: #d13438;
+            }
+            QPushButton.danger:hover {
+                background-color: #b02a2e;
+            }
+            QPushButton.success {
+                background-color: #107c10;
+            }
+            QPushButton.success:hover {
+                background-color: #0e6b0e;
+            }
+            QTreeWidget {
+                background-color: #404040;
+                border: 2px solid #555555;
+                border-radius: 8px;
+                color: white;
+                selection-background-color: #0078d4;
+                alternate-background-color: #454545;
+            }
+            QTreeWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #555555;
+            }
+            QTreeWidget::item:selected {
+                background-color: #0078d4;
+            }
+            QTreeWidget::item:hover {
+                background-color: #505050;
+            }
+            QHeaderView::section {
+                background-color: #505050;
+                color: white;
+                padding: 10px;
+                border: none;
+                border-right: 1px solid #666666;
+                font-weight: bold;
+            }
+            QTabWidget::pane {
+                border: 2px solid #555555;
+                border-radius: 8px;
+                background-color: #404040;
+            }
+            QTabBar::tab {
+                background-color: #505050;
+                color: #ffffff;
+                padding: 12px 20px;
+                margin-right: 2px;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                min-width: 100px;
+            }
+            QTabBar::tab:selected {
+                background-color: #0078d4;
+            }
+            QTabBar::tab:hover {
+                background-color: #606060;
+            }
+            QComboBox {
+                background-color: #404040;
+                border: 2px solid #555555;
+                border-radius: 6px;
+                padding: 8px;
+                color: white;
+                min-width: 120px;
+            }
+            QComboBox:hover {
+                border-color: #0078d4;
+            }
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #555555;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 10px 0 10px;
+            }
+            QProgressBar {
+                border: 2px solid #555555;
+                border-radius: 6px;
+                text-align: center;
+                background-color: #404040;
+            }
+            QProgressBar::chunk {
+                background-color: #0078d4;
+                border-radius: 4px;
+            }
+        """)
         
         # Controls frame
-        controls_frame = ttk.Frame(main_frame)
-        controls_frame.pack(fill=tk.X, pady=(0, 10))
+        controls_frame = QFrame()
+        controls_layout = QHBoxLayout(controls_frame)
+        controls_layout.setSpacing(10)
         
         # Left side - Import and utility buttons
-        left_buttons = ttk.Frame(controls_frame)
-        left_buttons.pack(side=tk.LEFT)
+        self.import_steam_btn = QPushButton("🎮 Import Steam Library")
+        self.import_steam_btn.clicked.connect(self.import_steam_library)
+        controls_layout.addWidget(self.import_steam_btn)
         
-        ttk.Button(left_buttons, text="Import Steam Library", command=self.import_steam_library).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(left_buttons, text="Import Epic Library", command=self.import_epic_library).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(left_buttons, text="Random Game", command=self.select_random_game).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(left_buttons, text="Refresh", command=self.load_games).pack(side=tk.LEFT, padx=(0, 5))
+        self.import_epic_btn = QPushButton("🎯 Import Epic Library")
+        self.import_epic_btn.clicked.connect(self.import_epic_library)
+        controls_layout.addWidget(self.import_epic_btn)
+        
+        self.random_game_btn = QPushButton("🎲 Random Game")
+        self.random_game_btn.setProperty("class", "success")
+        self.random_game_btn.clicked.connect(self.select_random_game)
+        controls_layout.addWidget(self.random_game_btn)
+        
+        self.refresh_btn = QPushButton("🔄 Refresh")
+        self.refresh_btn.clicked.connect(self.load_games)
+        controls_layout.addWidget(self.refresh_btn)
+        
+        controls_layout.addStretch()
         
         # Right side - Clear buttons
-        right_buttons = ttk.Frame(controls_frame)
-        right_buttons.pack(side=tk.RIGHT)
+        self.clear_steam_btn = QPushButton("🗑️ Clear Steam")
+        self.clear_steam_btn.setProperty("class", "danger")
+        self.clear_steam_btn.clicked.connect(self.clear_steam_games)
+        controls_layout.addWidget(self.clear_steam_btn)
         
-        ttk.Button(right_buttons, text="Clear Steam Games", command=self.clear_steam_games).pack(side=tk.LEFT, padx=(5, 0))
-        ttk.Button(right_buttons, text="Clear Epic Games", command=self.clear_epic_games).pack(side=tk.LEFT, padx=(5, 0))
+        self.clear_epic_btn = QPushButton("🗑️ Clear Epic")
+        self.clear_epic_btn.setProperty("class", "danger")
+        self.clear_epic_btn.clicked.connect(self.clear_epic_games)
+        controls_layout.addWidget(self.clear_epic_btn)
         
-        # Action buttons
-        action_frame = ttk.Frame(main_frame)
-        action_frame.pack(fill=tk.X, pady=(0, 5))
+        layout.addWidget(controls_frame)
         
-        ttk.Button(action_frame, text="Mark Selected as Completed", command=self.mark_game_completed).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(action_frame, text="Mark Selected as Incomplete", command=self.mark_game_incomplete).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(action_frame, text="Mark Selected as 100%", command=self.mark_game_hundred_percent).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Label(action_frame, text="(Use Ctrl+Click or Shift+Click to select multiple games)").pack(side=tk.LEFT, padx=(10, 0))
+        # Import status label
+        self.import_status_label = QLabel("")
+        self.import_status_label.setVisible(False)
+        self.import_status_label.setStyleSheet("""
+            QLabel {
+                background-color: #404040;
+                border: 2px solid #0078d4;
+                border-radius: 6px;
+                padding: 8px;
+                color: #0078d4;
+                font-weight: bold;
+                text-align: center;
+            }
+        """)
+        layout.addWidget(self.import_status_label)
         
-        # Filter frame
-        filter_frame = ttk.Frame(main_frame)
-        filter_frame.pack(fill=tk.X, pady=(0, 10))
+        # Search and filter controls
+        search_filter_frame = QFrame()
+        search_filter_layout = QHBoxLayout(search_filter_frame)
         
-        ttk.Label(filter_frame, text="Platform:").pack(side=tk.LEFT, padx=(0, 5))
-        self.platform_var = tk.StringVar(value="All")
-        platform_combo = ttk.Combobox(filter_frame, textvariable=self.platform_var, 
-                                     values=["All", "Steam", "Epic"], state="readonly", width=10)
-        platform_combo.pack(side=tk.LEFT, padx=(0, 10))
-        platform_combo.bind("<<ComboboxSelected>>", self.filter_games)
+        # Search box
+        search_filter_layout.addWidget(QLabel("🔍 Search:"))
+        self.search_box = QLineEdit()
+        self.search_box.setPlaceholderText("Search games...")
+        self.search_box.textChanged.connect(self.filter_games)
+        self.search_box.setStyleSheet("""
+            QLineEdit {
+                background-color: #404040;
+                border: 2px solid #555555;
+                border-radius: 6px;
+                padding: 8px;
+                color: white;
+                min-width: 200px;
+            }
+            QLineEdit:focus {
+                border-color: #0078d4;
+            }
+        """)
+        search_filter_layout.addWidget(self.search_box)
         
-        ttk.Label(filter_frame, text="Sort by:").pack(side=tk.LEFT, padx=(0, 5))
-        self.sort_var = tk.StringVar(value="Completion")
-        sort_combo = ttk.Combobox(filter_frame, textvariable=self.sort_var,
-                                 values=["Name", "Platform", "Playtime", "Achievements", "Completion"], 
-                                 state="readonly", width=12)
-        sort_combo.pack(side=tk.LEFT, padx=(0, 10))
-        sort_combo.bind("<<ComboboxSelected>>", self.sort_games)
+        search_filter_layout.addWidget(QLabel("Platform:"))
+        self.platform_filter = QComboBox()
+        self.platform_filter.addItems(["All", "Steam", "Epic"])
+        self.platform_filter.currentTextChanged.connect(self.filter_games)
+        search_filter_layout.addWidget(self.platform_filter)
         
-        ttk.Button(filter_frame, text="Clear Filters", command=self.clear_filters).pack(side=tk.LEFT, padx=(10, 0))
+        search_filter_layout.addWidget(QLabel("Sort by:"))
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItems(["Name", "Platform", "Playtime", "Achievements", "Achievement %"])
+        self.sort_combo.currentTextChanged.connect(self.sort_games)
+        search_filter_layout.addWidget(self.sort_combo)
         
-        # Create notebook for incomplete/completed games
-        self.games_notebook = ttk.Notebook(main_frame)
-        self.games_notebook.pack(fill=tk.BOTH, expand=True)
+        search_filter_layout.addStretch()
+        layout.addWidget(search_filter_frame)
+        
+        # Tab widget for incomplete/complete/100% games
+        self.games_tab_widget = QTabWidget()
         
         # Incomplete games tab
-        incomplete_frame = ttk.Frame(self.games_notebook)
-        self.games_notebook.add(incomplete_frame, text="Incomplete Games")
+        incomplete_widget = QWidget()
+        incomplete_layout = QVBoxLayout(incomplete_widget)
         
-        # Treeview for incomplete games
-        columns = ("platform", "playtime", "achievements", "completion", "last_played")
-        self.incomplete_tree = ttk.Treeview(incomplete_frame, columns=columns, show="tree headings", selectmode="extended")
+        # Multi-select controls for incomplete games
+        incomplete_controls = QFrame()
+        incomplete_controls_layout = QHBoxLayout(incomplete_controls)
         
-        # Configure columns
-        self.incomplete_tree.heading("#0", text="Game Name")
-        self.incomplete_tree.heading("platform", text="Platform")
-        self.incomplete_tree.heading("playtime", text="Playtime (hrs)")
-        self.incomplete_tree.heading("achievements", text="Achievements")
-        self.incomplete_tree.heading("completion", text="Completion %")
-        self.incomplete_tree.heading("last_played", text="Last Played")
+        self.mark_complete_btn = QPushButton("✅ Mark as Complete")
+        self.mark_complete_btn.setProperty("class", "success")
+        self.mark_complete_btn.clicked.connect(self.mark_games_complete)
+        self.mark_complete_btn.setEnabled(False)
+        incomplete_controls_layout.addWidget(self.mark_complete_btn)
         
-        self.incomplete_tree.column("#0", width=250)
-        self.incomplete_tree.column("platform", width=80)
-        self.incomplete_tree.column("playtime", width=100)
-        self.incomplete_tree.column("achievements", width=120)
-        self.incomplete_tree.column("completion", width=100)
-        self.incomplete_tree.column("last_played", width=120)
+        incomplete_controls_layout.addStretch()
+        incomplete_layout.addWidget(incomplete_controls)
         
-        # Scrollbar for incomplete games
-        incomplete_scroll = ttk.Scrollbar(incomplete_frame, orient=tk.VERTICAL, command=self.incomplete_tree.yview)
-        self.incomplete_tree.configure(yscrollcommand=incomplete_scroll.set)
+        # Incomplete games tree
+        self.incomplete_games_tree = QTreeWidget()
+        self.incomplete_games_tree.setHeaderLabels(["Name", "Platform", "Playtime (hrs)", "Achievements"])
+        self.incomplete_games_tree.setAlternatingRowColors(True)
+        self.incomplete_games_tree.setRootIsDecorated(False)
+        self.incomplete_games_tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
+        self.incomplete_games_tree.setColumnWidth(0, 300)
+        self.incomplete_games_tree.setColumnWidth(1, 100)
+        self.incomplete_games_tree.setColumnWidth(2, 120)
+        self.incomplete_games_tree.setColumnWidth(3, 120)
+        self.incomplete_games_tree.itemSelectionChanged.connect(self.on_incomplete_selection_changed)
+        self.incomplete_games_tree.itemDoubleClicked.connect(self.launch_selected_game)
+        incomplete_layout.addWidget(self.incomplete_games_tree)
         
-        self.incomplete_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        incomplete_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        # Complete games tab
+        complete_widget = QWidget()
+        complete_layout = QVBoxLayout(complete_widget)
         
-        # Completed games tab
-        completed_frame = ttk.Frame(self.games_notebook)
-        self.games_notebook.add(completed_frame, text="Completed Games")
+        # Multi-select controls for complete games
+        complete_controls = QFrame()
+        complete_controls_layout = QHBoxLayout(complete_controls)
         
-        # Treeview for completed games
-        self.completed_tree = ttk.Treeview(completed_frame, columns=columns, show="tree headings", selectmode="extended")
+        self.mark_incomplete_btn = QPushButton("↩️ Mark as Incomplete")
+        self.mark_incomplete_btn.clicked.connect(self.mark_games_incomplete)
+        self.mark_incomplete_btn.setEnabled(False)
+        complete_controls_layout.addWidget(self.mark_incomplete_btn)
         
-        # Configure columns (same as incomplete)
-        self.completed_tree.heading("#0", text="Game Name")
-        self.completed_tree.heading("platform", text="Platform")
-        self.completed_tree.heading("playtime", text="Playtime (hrs)")
-        self.completed_tree.heading("achievements", text="Achievements")
-        self.completed_tree.heading("completion", text="Completion %")
-        self.completed_tree.heading("last_played", text="Last Played")
+        complete_controls_layout.addStretch()
+        complete_layout.addWidget(complete_controls)
         
-        self.completed_tree.column("#0", width=250)
-        self.completed_tree.column("platform", width=80)
-        self.completed_tree.column("playtime", width=100)
-        self.completed_tree.column("achievements", width=120)
-        self.completed_tree.column("completion", width=100)
-        self.completed_tree.column("last_played", width=120)
+        # Complete games tree
+        self.complete_games_tree = QTreeWidget()
+        self.complete_games_tree.setHeaderLabels(["Name", "Platform", "Playtime (hrs)", "Achievements"])
+        self.complete_games_tree.setAlternatingRowColors(True)
+        self.complete_games_tree.setRootIsDecorated(False)
+        self.complete_games_tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
+        self.complete_games_tree.setColumnWidth(0, 300)
+        self.complete_games_tree.setColumnWidth(1, 100)
+        self.complete_games_tree.setColumnWidth(2, 120)
+        self.complete_games_tree.setColumnWidth(3, 120)
+        self.complete_games_tree.itemSelectionChanged.connect(self.on_complete_selection_changed)
+        self.complete_games_tree.itemDoubleClicked.connect(self.launch_selected_game)
+        complete_layout.addWidget(self.complete_games_tree)
         
-        # Scrollbar for completed games
-        completed_scroll = ttk.Scrollbar(completed_frame, orient=tk.VERTICAL, command=self.completed_tree.yview)
-        self.completed_tree.configure(yscrollcommand=completed_scroll.set)
+        # 100% Achievement games tab
+        hundred_percent_widget = QWidget()
+        hundred_percent_layout = QVBoxLayout(hundred_percent_widget)
         
-        self.completed_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        completed_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        # 100% games tree
+        self.hundred_percent_tree = QTreeWidget()
+        self.hundred_percent_tree.setHeaderLabels(["Name", "Platform", "Playtime (hrs)", "Achievements"])
+        self.hundred_percent_tree.setAlternatingRowColors(True)
+        self.hundred_percent_tree.setRootIsDecorated(False)
+        self.hundred_percent_tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
+        self.hundred_percent_tree.setColumnWidth(0, 300)
+        self.hundred_percent_tree.setColumnWidth(1, 100)
+        self.hundred_percent_tree.setColumnWidth(2, 120)
+        self.hundred_percent_tree.setColumnWidth(3, 120)
+        self.hundred_percent_tree.itemDoubleClicked.connect(self.launch_selected_game)
+        hundred_percent_layout.addWidget(self.hundred_percent_tree)
         
-        # 100% Games tab
-        hundred_percent_frame = ttk.Frame(self.games_notebook)
-        self.games_notebook.add(hundred_percent_frame, text="100% Games")
+        # Add tabs
+        self.games_tab_widget.addTab(incomplete_widget, "📋 Incomplete Games")
+        self.games_tab_widget.addTab(complete_widget, "✅ Complete Games")
+        self.games_tab_widget.addTab(hundred_percent_widget, "🏆 100% Achievement")
         
-        # Treeview for 100% games
-        self.hundred_percent_tree = ttk.Treeview(hundred_percent_frame, columns=columns, show="tree headings", selectmode="extended")
-        
-        # Configure columns (same as others)
-        self.hundred_percent_tree.heading("#0", text="Game Name")
-        self.hundred_percent_tree.heading("platform", text="Platform")
-        self.hundred_percent_tree.heading("playtime", text="Playtime (hrs)")
-        self.hundred_percent_tree.heading("achievements", text="Achievements")
-        self.hundred_percent_tree.heading("completion", text="Completion %")
-        self.hundred_percent_tree.heading("last_played", text="Last Played")
-        
-        self.hundred_percent_tree.column("#0", width=250)
-        self.hundred_percent_tree.column("platform", width=80)
-        self.hundred_percent_tree.column("playtime", width=100)
-        self.hundred_percent_tree.column("achievements", width=120)
-        self.hundred_percent_tree.column("completion", width=100)
-        self.hundred_percent_tree.column("last_played", width=120)
-        
-        # Scrollbar for 100% games
-        hundred_percent_scroll = ttk.Scrollbar(hundred_percent_frame, orient=tk.VERTICAL, command=self.hundred_percent_tree.yview)
-        self.hundred_percent_tree.configure(yscrollcommand=hundred_percent_scroll.set)
-        
-        self.hundred_percent_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        hundred_percent_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Context menus
-        self.incomplete_menu = tk.Menu(self.frame, tearoff=0)
-        self.incomplete_menu.add_command(label="Launch Game", command=self.launch_selected_game)
-        self.incomplete_menu.add_separator()
-        self.incomplete_menu.add_command(label="Mark as Completed", command=self.mark_game_completed)
-        self.incomplete_menu.add_command(label="View Details", command=self.show_game_details)
-        
-        self.completed_menu = tk.Menu(self.frame, tearoff=0)
-        self.completed_menu.add_command(label="Launch Game", command=self.launch_selected_game)
-        self.completed_menu.add_separator()
-        self.completed_menu.add_command(label="Mark as Incomplete", command=self.mark_game_incomplete)
-        self.completed_menu.add_command(label="View Details", command=self.show_game_details)
-        
-        self.hundred_percent_menu = tk.Menu(self.frame, tearoff=0)
-        self.hundred_percent_menu.add_command(label="Launch Game", command=self.launch_selected_game)
-        self.hundred_percent_menu.add_separator()
-        self.hundred_percent_menu.add_command(label="Mark as Incomplete", command=self.mark_game_incomplete)
-        self.hundred_percent_menu.add_command(label="View Details", command=self.show_game_details)
-        
-        # Bind events
-        self.incomplete_tree.bind("<Button-3>", lambda e: self.show_context_menu(e, "incomplete"))
-        self.incomplete_tree.bind("<Double-1>", self.launch_selected_game)
-        self.incomplete_tree.bind("<Return>", lambda e: self.mark_game_completed())  # Enter key to mark completed
-        self.incomplete_tree.bind("<Delete>", lambda e: self.mark_game_completed())  # Delete key to mark completed
-        
-        self.completed_tree.bind("<Button-3>", lambda e: self.show_context_menu(e, "completed"))
-        self.completed_tree.bind("<Double-1>", self.launch_selected_game)
-        self.completed_tree.bind("<Return>", lambda e: self.mark_game_incomplete())  # Enter key to mark incomplete
-        self.completed_tree.bind("<Delete>", lambda e: self.mark_game_incomplete())  # Delete key to mark incomplete
-        
-        self.hundred_percent_tree.bind("<Button-3>", lambda e: self.show_context_menu(e, "hundred_percent"))
-        self.hundred_percent_tree.bind("<Double-1>", self.launch_selected_game)
-        self.hundred_percent_tree.bind("<Return>", lambda e: self.mark_game_incomplete())  # Enter key to mark incomplete
-        self.hundred_percent_tree.bind("<Delete>", lambda e: self.mark_game_incomplete())  # Delete key to mark incomplete
+        layout.addWidget(self.games_tab_widget)
     
-    def load_games(self):
-        """Load games from database into all trees"""
-        # Clear existing items
-        for item in self.incomplete_tree.get_children():
-            self.incomplete_tree.delete(item)
-        for item in self.completed_tree.get_children():
-            self.completed_tree.delete(item)
-        for item in self.hundred_percent_tree.get_children():
-            self.hundred_percent_tree.delete(item)
-        
-        # Get filter values
-        platform_filter = self.platform_var.get()
-        
-        # Load games by category
-        if platform_filter == "All":
-            incomplete_games = self.db.get_games_by_completion(completed=False)
-            completed_games = self.db.get_games_by_completion(completed=True)
-            hundred_percent_games = self.db.get_hundred_percent_games()
-        else:
-            incomplete_games = self.db.get_games_by_completion(completed=False, platform=platform_filter)
-            completed_games = self.db.get_games_by_completion(completed=True, platform=platform_filter)
-            hundred_percent_games = self.db.get_hundred_percent_games(platform=platform_filter)
-        
-        # Sort games
-        incomplete_games = self.sort_games_list(incomplete_games)
-        completed_games = self.sort_games_list(completed_games)
-        hundred_percent_games = self.sort_games_list(hundred_percent_games)
-        
-        # Add incomplete games to tree
-        for game in incomplete_games:
-            self.add_game_to_tree(game, self.incomplete_tree)
-        
-        # Add completed games to tree
-        for game in completed_games:
-            self.add_game_to_tree(game, self.completed_tree)
-        
-        # Add 100% games to tree
-        for game in hundred_percent_games:
-            self.add_game_to_tree(game, self.hundred_percent_tree)
+    def on_incomplete_selection_changed(self):
+        """Handle selection change in incomplete games tree"""
+        selected_items = self.incomplete_games_tree.selectedItems()
+        self.mark_complete_btn.setEnabled(len(selected_items) > 0)
     
-    def add_game_to_tree(self, game, tree):
-        """Add a game to the specified tree with proper formatting"""
-        # Format playtime
-        playtime_hours = game['playtime'] / 60 if game['playtime'] else 0
-        playtime_str = f"{playtime_hours:.1f}" if playtime_hours > 0 else "0"
+    def on_complete_selection_changed(self):
+        """Handle selection change in complete games tree"""
+        selected_items = self.complete_games_tree.selectedItems()
+        self.mark_incomplete_btn.setEnabled(len(selected_items) > 0)
+    
+    def mark_games_complete(self):
+        """Mark selected games as complete"""
+        selected_items = self.incomplete_games_tree.selectedItems()
+        if not selected_items:
+            return
         
-        # Format achievements and completion percentage
-        completion_percentage = 0
-        if game['has_achievements'] and game['achievements_total'] > 0:
-            achievements_str = f"{game['achievements_unlocked']}/{game['achievements_total']}"
-            completion_percentage = (game['achievements_unlocked'] / game['achievements_total']) * 100
-        else:
-            achievements_str = "N/A"
-        
-        completion_str = f"{completion_percentage:.1f}%" if game['has_achievements'] else "N/A"
-        
-        # Format last played
-        last_played = game['last_played'] or "Never"
-        if last_played != "Never":
+        try:
+            # Use a single transaction for all games
+            cursor = self.db.conn.cursor()
+            for item in selected_items:
+                game_id = item.data(0, Qt.ItemDataRole.UserRole)
+                if game_id:
+                    cursor.execute("UPDATE games SET is_completed = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (True, game_id))
+            self.db.conn.commit()
+            
+            self.load_games()
+            show_toast(self, f"✅ Marked {len(selected_items)} game(s) as complete!")
+            
+        except Exception as e:
             try:
-                last_played = datetime.fromisoformat(last_played).strftime("%Y-%m-%d")
+                self.db.conn.rollback()
             except:
                 pass
-        
-        tree.insert("", tk.END,
-                   text=game['name'],
-                   values=(game['platform'], playtime_str, achievements_str, completion_str, last_played),
-                   tags=(game['id'], game['appid'], game['platform']))
+            QMessageBox.critical(self, "Error", f"Failed to mark games as completed: {e}")
     
-    def sort_games_list(self, games):
-        """Sort games list based on current sort selection"""
-        sort_by = self.sort_var.get()
-        
-        if sort_by == "Name":
-            return sorted(games, key=lambda x: x['name'].lower())
-        elif sort_by == "Platform":
-            return sorted(games, key=lambda x: (x['platform'], x['name'].lower()))
-        elif sort_by == "Playtime":
-            return sorted(games, key=lambda x: x['playtime'] or 0, reverse=True)
-        elif sort_by == "Achievements":
-            return sorted(games, key=lambda x: (x['achievements_unlocked'] or 0, x['name'].lower()), reverse=True)
-        elif sort_by == "Completion":
-            def completion_key(game):
-                if game['has_achievements'] and game['achievements_total'] > 0:
-                    return (game['achievements_unlocked'] / game['achievements_total']) * 100
-                return 0
-            return sorted(games, key=completion_key, reverse=True)
-        else:
-            return games
-    
-    def filter_games(self, event=None):
-        """Filter games by platform"""
-        self.load_games()
-    
-    def sort_games(self, event=None):
-        """Sort games by selected criteria"""
-        self.load_games()
-    
-    def clear_filters(self):
-        """Clear all filters and sorting"""
-        self.platform_var.set("All")
-        self.sort_var.set("Completion")
-        self.load_games()
-    
-    def mark_game_completed(self):
-        """Mark selected games as completed"""
-        # Determine which tree to use based on current tab or focus
-        current_tab = self.games_notebook.index(self.games_notebook.select())
-        if current_tab == 0:  # Incomplete games tab
-            tree = self.incomplete_tree
-            selection = tree.selection()
-        else:
-            # If we're on completed tab, check if incomplete tree has selection
-            incomplete_selection = self.incomplete_tree.selection()
-            if incomplete_selection:
-                tree = self.incomplete_tree
-                selection = incomplete_selection
-            else:
-                messagebox.showwarning("Warning", "Please go to Incomplete Games tab and select games to mark as completed")
-                return
-        
-        if not selection:
-            messagebox.showwarning("Warning", "Please select one or more games to mark as completed")
-            return
-        
-        # Get selected games
-        selected_games = []
-        for item_id in selection:
-            item = tree.item(item_id)
-            game_name = item['text']
-            game_id = item['tags'][0]
-            selected_games.append((game_id, game_name))
-        
-        # Confirm action
-        if len(selected_games) == 1:
-            confirm_msg = f"Mark '{selected_games[0][1]}' as completed?"
-        else:
-            confirm_msg = f"Mark {len(selected_games)} games as completed?"
-        
-        if messagebox.askyesno("Confirm", confirm_msg):
-            try:
-                failed_games = []
-                for game_id, game_name in selected_games:
-                    try:
-                        self.db.mark_game_completed(game_id, True)
-                    except Exception as e:
-                        failed_games.append(game_name)
-                
-                self.load_games()
-                
-                # Only show error if some games failed
-                if failed_games:
-                    messagebox.showerror("Error", f"Failed to mark these games as completed:\n" + "\n".join(failed_games))
-                    
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to mark games as completed: {e}")
-    
-    def mark_game_incomplete(self):
+    def mark_games_incomplete(self):
         """Mark selected games as incomplete"""
-        # Determine which tree to use based on current tab or focus
-        current_tab = self.games_notebook.index(self.games_notebook.select())
-        if current_tab == 1:  # Completed games tab
-            tree = self.completed_tree
-            selection = tree.selection()
-        else:
-            # If we're on incomplete tab, check if completed tree has selection
-            completed_selection = self.completed_tree.selection()
-            if completed_selection:
-                tree = self.completed_tree
-                selection = completed_selection
-            else:
-                messagebox.showwarning("Warning", "Please go to Completed Games tab and select games to mark as incomplete")
-                return
-        
-        if not selection:
-            messagebox.showwarning("Warning", "Please select one or more games to mark as incomplete")
+        selected_items = self.complete_games_tree.selectedItems()
+        if not selected_items:
             return
         
-        # Get selected games
-        selected_games = []
-        for item_id in selection:
-            item = tree.item(item_id)
-            game_name = item['text']
-            game_id = item['tags'][0]
-            selected_games.append((game_id, game_name))
-        
-        # Confirm action
-        if len(selected_games) == 1:
-            confirm_msg = f"Mark '{selected_games[0][1]}' as incomplete?"
-        else:
-            confirm_msg = f"Mark {len(selected_games)} games as incomplete?"
-        
-        if messagebox.askyesno("Confirm", confirm_msg):
+        try:
+            # Use a single transaction for all games
+            cursor = self.db.conn.cursor()
+            for item in selected_items:
+                game_id = item.data(0, Qt.ItemDataRole.UserRole)
+                if game_id:
+                    cursor.execute("UPDATE games SET is_completed = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (False, game_id))
+            self.db.conn.commit()
+            
+            self.load_games()
+            show_toast(self, f"✅ Marked {len(selected_items)} game(s) as incomplete!")
+            
+        except Exception as e:
             try:
-                failed_games = []
-                for game_id, game_name in selected_games:
-                    try:
-                        self.db.mark_game_completed(game_id, False)
-                    except Exception as e:
-                        failed_games.append(game_name)
-                
-                self.load_games()
-                
-                # Only show error if some games failed
-                if failed_games:
-                    messagebox.showerror("Error", f"Failed to mark these games as incomplete:\n" + "\n".join(failed_games))
-                    
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to mark games as incomplete: {e}")
+                self.db.conn.rollback()
+            except:
+                pass
+            QMessageBox.critical(self, "Error", f"Failed to mark games as incomplete: {e}")
+        
+        self.load_games()
+        show_toast(self, f"↩️ Marked {len(selected_items)} game(s) as incomplete!")
+    
+    def load_games(self):
+        """Load games from database"""
+        self.incomplete_games_tree.clear()
+        self.complete_games_tree.clear()
+        self.hundred_percent_tree.clear()
+        
+        games = self.db.get_games()
+        
+        for game in games:
+            # Format playtime (convert minutes to hours)
+            playtime_hours = game['playtime'] / 60.0 if game['playtime'] else 0
+            playtime = f"{playtime_hours:.1f}h" if playtime_hours else "0h"
+            
+            # Format achievements
+            if game['achievements_total'] and game['achievements_total'] > 0:
+                achievements = f"{game['achievements_unlocked']}/{game['achievements_total']}"
+                completion_rate = (game['achievements_unlocked'] / game['achievements_total']) * 100
+                achievements += f" ({completion_rate:.1f}%)"
+                is_hundred_percent = completion_rate == 100.0
+            else:
+                achievements = "No achievements"
+                completion_rate = 0
+                is_hundred_percent = False
+            
+            # Create tree item
+            item = QTreeWidgetItem([
+                game['name'],
+                game['platform'],
+                playtime,
+                achievements
+            ])
+            
+            # Store game ID for database operations
+            item.setData(0, Qt.ItemDataRole.UserRole, game['id'])
+            
+            # Check if game is marked as complete in database
+            is_complete = game['is_completed'] if 'is_completed' in game.keys() else False
+            
+            # Add to 100% tab if it has 100% achievements
+            if is_hundred_percent:
+                hundred_item = QTreeWidgetItem([
+                    game['name'],
+                    game['platform'],
+                    playtime,
+                    achievements
+                ])
+                hundred_item.setData(0, Qt.ItemDataRole.UserRole, game['id'])
+                self.hundred_percent_tree.addTopLevelItem(hundred_item)
+                # Color 100% games gold
+                for i in range(4):
+                    hundred_item.setBackground(i, QColor("#5a4d2d"))  # Dark gold
+            
+            # Add to appropriate completion tree
+            if is_complete:
+                self.complete_games_tree.addTopLevelItem(item)
+                # Color complete games green
+                for i in range(4):
+                    item.setBackground(i, QColor("#2d5a2d"))
+            else:
+                self.incomplete_games_tree.addTopLevelItem(item)
+                # Color code incomplete games based on achievement completion
+                if completion_rate >= 80:
+                    for i in range(4):
+                        item.setBackground(i, QColor("#5a5a2d"))  # Dark yellow for high completion
+        
+        # Apply current filters
+        self.filter_games()
+    
+    def filter_games(self):
+        """Filter games by search text and platform"""
+        search_text = self.search_box.text().lower()
+        platform_filter = self.platform_filter.currentText()
+        
+        # Filter incomplete games
+        for i in range(self.incomplete_games_tree.topLevelItemCount()):
+            item = self.incomplete_games_tree.topLevelItem(i)
+            name_match = search_text in item.text(0).lower()
+            platform_match = platform_filter == "All" or item.text(1) == platform_filter
+            item.setHidden(not (name_match and platform_match))
+        
+        # Filter complete games
+        for i in range(self.complete_games_tree.topLevelItemCount()):
+            item = self.complete_games_tree.topLevelItem(i)
+            name_match = search_text in item.text(0).lower()
+            platform_match = platform_filter == "All" or item.text(1) == platform_filter
+            item.setHidden(not (name_match and platform_match))
+        
+        # Filter 100% games
+        for i in range(self.hundred_percent_tree.topLevelItemCount()):
+            item = self.hundred_percent_tree.topLevelItem(i)
+            name_match = search_text in item.text(0).lower()
+            platform_match = platform_filter == "All" or item.text(1) == platform_filter
+            item.setHidden(not (name_match and platform_match))
+    
+    def sort_games(self):
+        """Sort games by selected criteria"""
+        sort_by = self.sort_combo.currentText()
+        
+        if sort_by == "Achievement %":
+            # Custom sort by achievement percentage
+            self.sort_by_achievement_percentage()
+        else:
+            # Map sort criteria to column indices
+            sort_columns = {
+                "Name": 0,
+                "Platform": 1,
+                "Playtime": 2,
+                "Achievements": 3
+            }
+            
+            column = sort_columns.get(sort_by, 0)
+            
+            # Sort all trees
+            self.incomplete_games_tree.sortItems(column, Qt.SortOrder.AscendingOrder)
+            self.complete_games_tree.sortItems(column, Qt.SortOrder.AscendingOrder)
+            self.hundred_percent_tree.sortItems(column, Qt.SortOrder.AscendingOrder)
+    
+    def sort_by_achievement_percentage(self):
+        """Sort games by achievement completion percentage"""
+        # Instead of moving items, just reload the games with custom sorting
+        # This is safer and avoids Qt object deletion issues
+        self.load_games_sorted_by_achievement_percentage()
+    
+    def load_games_sorted_by_achievement_percentage(self):
+        """Load games sorted by achievement completion percentage"""
+        self.incomplete_games_tree.clear()
+        self.complete_games_tree.clear()
+        self.hundred_percent_tree.clear()
+        
+        games = self.db.get_games()
+        
+        # Calculate achievement percentages and sort
+        games_with_percentage = []
+        for game in games:
+            if game['achievements_total'] and game['achievements_total'] > 0:
+                percentage = (game['achievements_unlocked'] / game['achievements_total']) * 100
+            else:
+                percentage = 0
+            games_with_percentage.append((game, percentage))
+        
+        # Sort by percentage (descending - highest completion first)
+        games_with_percentage.sort(key=lambda x: x[1], reverse=True)
+        
+        # Add games to appropriate trees
+        for game, percentage in games_with_percentage:
+            # Format playtime (convert minutes to hours)
+            playtime_hours = game['playtime'] / 60.0 if game['playtime'] else 0
+            playtime = f"{playtime_hours:.1f}h" if playtime_hours else "0h"
+            
+            # Format achievements
+            if game['achievements_total'] and game['achievements_total'] > 0:
+                achievements = f"{game['achievements_unlocked']}/{game['achievements_total']}"
+                achievements += f" ({percentage:.1f}%)"
+                is_hundred_percent = percentage == 100.0
+            else:
+                achievements = "No achievements"
+                is_hundred_percent = False
+            
+            # Create tree item
+            item = QTreeWidgetItem([
+                game['name'],
+                game['platform'],
+                playtime,
+                achievements
+            ])
+            
+            # Store game ID for database operations
+            item.setData(0, Qt.ItemDataRole.UserRole, game['id'])
+            
+            # Add to 100% tab if it has 100% achievements
+            if is_hundred_percent:
+                hundred_item = QTreeWidgetItem([
+                    game['name'],
+                    game['platform'],
+                    playtime,
+                    achievements
+                ])
+                hundred_item.setData(0, Qt.ItemDataRole.UserRole, game['id'])
+                self.hundred_percent_tree.addTopLevelItem(hundred_item)
+                # Color 100% games gold
+                for i in range(4):
+                    hundred_item.setBackground(i, QColor("#5a4d2d"))  # Dark gold
+            
+            # Check if game is marked as complete in database
+            is_complete = game['is_completed'] if 'is_completed' in game.keys() else False
+            
+            # Add to appropriate completion tree
+            if is_complete:
+                self.complete_games_tree.addTopLevelItem(item)
+                # Color complete games green
+                for i in range(4):
+                    item.setBackground(i, QColor("#2d5a2d"))
+            else:
+                self.incomplete_games_tree.addTopLevelItem(item)
+                # Color code incomplete games based on achievement completion
+                if percentage >= 80:
+                    for i in range(4):
+                        item.setBackground(i, QColor("#5a5a2d"))  # Dark yellow for high completion
+        
+        # Apply current filters
+        self.filter_games()
     
     def import_steam_library(self):
-        """Import Steam library using Steam Web API"""
+        """Import Steam library"""
         steam_api_key = self.db.get_setting('steam_api_key')
         steam_id = self.db.get_setting('steam_id')
         
         if not steam_api_key or not steam_id:
-            messagebox.showerror("Error", "Steam API key and Steam ID must be configured in Settings")
+            QMessageBox.warning(self, "Configuration Required", 
+                              "Please configure Steam API key and Steam ID in Settings first.")
             return
+        
+        # Don't show initial fetching message, wait for count
         
         def import_in_thread():
             try:
@@ -432,542 +647,320 @@ class GamesTab:
                     'key': steam_api_key,
                     'steamid': steam_id,
                     'format': 'json',
-                    'include_appinfo': 1,
-                    'include_played_free_games': 1
+                    'include_appinfo': True,
+                    'include_played_free_games': True
                 }
                 
-                response = requests.get(url, params=params)
+                response = requests.get(url, params=params, timeout=30)
                 response.raise_for_status()
                 data = response.json()
                 
                 if 'response' not in data or 'games' not in data['response']:
-                    raise Exception("No games found. Check if Steam profile is public.")
+                    raise Exception("Invalid response from Steam API")
                 
                 games = data['response']['games']
+                imported_count = 0
+                total_games = len(games)
+                processed_count = 0
                 
-                # Note: We no longer clear existing games to preserve completion status
+                # Show initial count immediately
+                self.update_import_status.emit(f"🔄 Processing Steam games: 0/{total_games}")
                 
-                # Import each game
                 for game in games:
-                    appid = str(game['appid'])
+                    processed_count += 1
+                    # Update counter in main thread
+                    self.update_import_status.emit(f"🔄 Processing Steam games: {processed_count}/{total_games}")
+                    app_id = game['appid']
                     name = game['name']
-                    playtime = game.get('playtime_forever', 0)
-                    has_stats = game.get('has_community_visible_stats', False)
+                    playtime_minutes = game.get('playtime_forever', 0)
+                    playtime_hours = playtime_minutes / 60.0
                     
-                    # Get achievements if available
-                    achievements_total = 0
+                    # Get achievement data
                     achievements_unlocked = 0
+                    achievements_total = 0
                     
-                    if has_stats:
-                        try:
-                            # Get game achievements
-                            ach_url = "http://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v0001/"
-                            ach_params = {
-                                'appid': appid,
-                                'key': steam_api_key,
-                                'steamid': steam_id
-                            }
-                            
-                            ach_response = requests.get(ach_url, params=ach_params)
-                            if ach_response.status_code == 200:
-                                ach_data = ach_response.json()
-                                if 'playerstats' in ach_data and 'achievements' in ach_data['playerstats']:
-                                    achievements = ach_data['playerstats']['achievements']
-                                    achievements_total = len(achievements)
-                                    achievements_unlocked = sum(1 for ach in achievements if ach.get('achieved', 0) == 1)
-                        except:
-                            pass  # Skip achievements if API call fails
+                    try:
+                        # Get player achievements
+                        ach_url = "http://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v0001/"
+                        ach_params = {
+                            'key': steam_api_key,
+                            'steamid': steam_id,
+                            'appid': app_id
+                        }
+                        
+                        ach_response = requests.get(ach_url, params=ach_params, timeout=10)
+                        if ach_response.status_code == 200:
+                            ach_data = ach_response.json()
+                            if 'playerstats' in ach_data and 'achievements' in ach_data['playerstats']:
+                                achievements = ach_data['playerstats']['achievements']
+                                achievements_total = len(achievements)
+                                achievements_unlocked = sum(1 for ach in achievements if ach.get('achieved', 0) == 1)
+                    except:
+                        pass  # Achievement data is optional
                     
-                    # Add to database
-                    self.db.add_or_update_game(
-                        appid=appid,
-                        name=name,
-                        platform='Steam',
-                        playtime=playtime,
-                        achievements_total=achievements_total,
-                        achievements_unlocked=achievements_unlocked,
-                        has_achievements=has_stats
-                    )
+                    # Check if this is a new game
+                    cursor = self.db.conn.cursor()
+                    cursor.execute("SELECT id FROM games WHERE appid = ? AND platform = ?", (app_id, 'Steam'))
+                    existing = cursor.fetchone()
+                    
+                    # Add or update game in database (playtime in minutes)
+                    game_id = self.db.add_or_update_game(app_id, name, 'Steam', 
+                                                        playtime=playtime_minutes,
+                                                        achievements_unlocked=achievements_unlocked,
+                                                        achievements_total=achievements_total,
+                                                        has_achievements=(achievements_total > 0))
+                    
+                    # Only count as imported if it's a new game
+                    if not existing and game_id:
+                        imported_count += 1
                 
-                self.frame.after(0, lambda: messagebox.showinfo("Success", f"Imported {len(games)} Steam games!"))
-                self.frame.after(0, self.load_games)
+                # Schedule UI updates in main thread
+                self.update_import_status.emit(f"✅ Imported {imported_count} out of {total_games} Steam games!")
+                QTimer.singleShot(2000, lambda: self.hide_import_status.emit())  # Hide after 2 seconds
+                QTimer.singleShot(0, lambda: self.load_games())
+                QTimer.singleShot(0, lambda: show_toast(self, f"✅ Imported {imported_count} new Steam games!"))
                 
             except Exception as e:
-                error_msg = str(e)
-                self.frame.after(0, lambda: messagebox.showerror("Error", f"Failed to import Steam library: {error_msg}"))
+                self.hide_import_status.emit()
+                QTimer.singleShot(0, lambda: QMessageBox.critical(self, "Error", f"Failed to import Steam library: {e}"))
         
         threading.Thread(target=import_in_thread, daemon=True).start()
     
     def import_epic_library(self):
-        """Import Epic Games library using legendary CLI with stored auth code"""
-        # Check if auth code is configured
-        auth_code = self.db.get_setting('epic_auth_code')
-        if not auth_code:
-            messagebox.showerror("Error", 
-                "Epic Games authentication not configured.\n\n"
-                "Please go to Settings → API Keys tab and:\n"
-                "1. Click 'Get Auth Code'\n"
-                "2. Complete Epic Games login\n"
-                "3. Copy and save the authorization code")
-            return
+        """Import Epic Games library using legendary"""
+        # Don't show initial fetching message, wait for count
         
         def import_in_thread():
             try:
-                # Check if legendary is installed
-                version_check = subprocess.run(['legendary', '--version'], capture_output=True, text=True, 
-                                             encoding='utf-8', errors='ignore', timeout=10)
-                if version_check.returncode != 0:
-                    self.frame.after(0, lambda: messagebox.showerror("Error", 
-                        "Legendary CLI not found. Please install legendary first:\n\n"
-                        "pip install legendary-gl"))
-                    return
+                # Run legendary list command with shorter timeout
+                result = subprocess.run(['legendary', 'list'], capture_output=True, text=True, 
+                                       encoding='utf-8', errors='ignore', timeout=30)
                 
-                # Authenticate with stored auth code if needed
-                auth_result = subprocess.run(['legendary', 'auth', '--code', auth_code], 
-                                           capture_output=True, text=True, encoding='utf-8', 
-                                           errors='ignore', timeout=30)
+                if result.returncode != 0:
+                    raise Exception(f"Legendary command failed: {result.stderr}")
                 
-                # Try different commands to get games list
-                list_result = None
+                # Parse legendary output
+                lines = result.stdout.split('\n')
+                imported_count = 0
                 
-                # Method 1: Try 'legendary list-games' first (cleaner output)
-                try:
-                    list_result = subprocess.run(['legendary', 'list-games'], capture_output=True, text=True, 
-                                               encoding='utf-8', errors='ignore', timeout=30)
-                    if list_result.returncode != 0:
-                        list_result = None
-                except:
-                    list_result = None
+                # Find valid game lines (start with ' * ' and contain 'App name:')
+                valid_lines = [line for line in lines if line.strip().startswith('*') and 'App name:' in line]
+                total_games = len(valid_lines)
+                processed_count = 0
                 
-                # Method 2: Fallback to 'legendary list'
-                if list_result is None:
-                    list_result = subprocess.run(['legendary', 'list'], capture_output=True, text=True, 
-                                               encoding='utf-8', errors='ignore', timeout=30)
-                
-                if list_result.returncode != 0:
-                    error_output = list_result.stderr or list_result.stdout or "Unknown error"
-                    self.frame.after(0, lambda: messagebox.showerror("Error", 
-                        f"Failed to get Epic Games library:\n{error_output[:300]}"))
-                    return
-                
-                # Parse games from output
-                games = []
-                lines = list_result.stdout.split('\n')
-                
-                # Debug: Show what we're actually parsing
-                print(f"DEBUG: Legendary output has {len(lines)} lines")
-                for i, line in enumerate(lines[:10]):  # Show first 10 lines
-                    print(f"DEBUG Line {i}: '{line.strip()}'")
+                # Show initial count immediately
+                self.update_import_status.emit(f"🔄 Processing Epic games: 0/{total_games}")
                 
                 for line in lines:
-                    line = line.strip()
-                    
-                    # Skip empty lines and obvious non-game entries
-                    if not line or line.startswith('[') or line.startswith('Legendary') or line.startswith('INFO:'):
-                        continue
-                    
-                    # Skip DLC entries (start with +) and non-game entries (start with -)
-                    if line.startswith('+') or line.startswith('-'):
-                        continue
-                    
-                    # Look for main game entries (start with *)
-                    if line.startswith('* '):
-                        # Format: * Game Name (App name: app_id | Version: version)
+                    if line.strip().startswith('*') and 'App name:' in line:
+                        processed_count += 1
+                        # Update counter in main thread
+                        self.update_import_status.emit(f"🔄 Processing Epic games: {processed_count}/{total_games}")
+                        
                         try:
-                            # Remove the "* " prefix
-                            content = line[2:]
+                            # Parse format: * "Game Name" (App name: app_id | Version: version)
+                            # Extract game name (between * and first parenthesis)
+                            name_part = line.split('(App name:')[0].strip()
+                            if name_part.startswith('*'):
+                                name = name_part[1:].strip().strip('"')
                             
-                            # Find the opening parenthesis for app info
-                            paren_pos = content.rfind(' (App name: ')
-                            if paren_pos == -1:
-                                continue
+                            # Extract version info to check for UE assets
+                            version_part = ""
+                            if '| Version:' in line:
+                                version_part = line.split('| Version:')[1].strip().rstrip(')')
                             
-                            # Extract game name (everything before the parenthesis)
-                            game_name = content[:paren_pos].strip()
-                            
-                            # Extract app info (everything after "App name: ")
-                            app_info = content[paren_pos + 12:]  # 12 = len(' (App name: ')
-                            
-                            # Find the pipe separator in app info
-                            pipe_pos = app_info.find(' | Version:')
-                            if pipe_pos == -1:
-                                continue
-                            
-                            # Extract app name (everything before " | Version:")
-                            app_name = app_info[:pipe_pos].strip()
-                            
-                            # Filter out UE5 assets and development samples
-                            skip_patterns = [
-                                'UE5+Dev-Marketplace',
-                                'UE5+Release',
-                                'Animation Sample',
-                                'Learning Kit',
-                                'Virtual Studio',
-                                'Stack O Bot',
-                                'Teleportation and Portal',
-                                'Slay Animation Sample'
+                            # Skip UE4/UE5 assets and engine content
+                            skip_terms_name = [
+                                'unreal engine', 'ue4', 'ue5', 'marketplace', 
+                                'asset pack', 'content pack', 'sample project',
+                                'lyra starter game', 'pixel streaming demo', 'stack o bot',
+                                'slay animation sample', 'virtual studio', 'unreal learning kit'
                             ]
                             
-                            # Check if this is a UE5 asset or development sample
-                            is_ue_asset = any(pattern in content for pattern in skip_patterns)
+                            skip_terms_version = [
+                                '+++ue4+dev-marketplace', '+++ue5+dev-marketplace',
+                                '+++ue4+release', '+++ue5+release',
+                                'dev-marketplace-windows', 'release-5.', 'release-4.'
+                            ]
                             
-                            # Also check for version patterns that indicate UE5 assets
-                            version_part = app_info[pipe_pos:] if pipe_pos != -1 else ""
-                            is_ue_version = "+++UE5+" in version_part
+                            # Check name for skip terms
+                            if any(skip_term in name.lower() for skip_term in skip_terms_name):
+                                continue
+                                
+                            # Check version for UE marketplace/engine indicators
+                            if any(skip_term in version_part.lower() for skip_term in skip_terms_version):
+                                continue
                             
-                            # Validate and add the game (skip UE5 assets)
-                            if (game_name and app_name and len(game_name) > 1 and len(app_name) > 2 
-                                and not is_ue_asset and not is_ue_version):
-                                games.append((app_name, game_name))
-                                print(f"DEBUG: Found game: {app_name} | {game_name}")
-                            elif is_ue_asset or is_ue_version:
-                                print(f"DEBUG: Skipped UE5 asset: {game_name}")
+                            # Extract app_id (between 'App name:' and '|')
+                            app_name_part = line.split('App name:')[1].split('|')[0].strip()
+                            app_id = app_name_part
                             
+                            # Check if this is a new game
+                            cursor = self.db.conn.cursor()
+                            cursor.execute("SELECT id FROM games WHERE appid = ? AND platform = ?", (app_id, 'Epic'))
+                            existing = cursor.fetchone()
+                            
+                            # Epic Games doesn't provide playtime/achievement data via legendary
+                            # So we'll use default values
+                            game_id = self.db.add_or_update_game(app_id, name, 'Epic', 
+                                                                playtime=0, 
+                                                                achievements_unlocked=0, 
+                                                                achievements_total=0,
+                                                                has_achievements=False)
+                            
+                            # Only count as imported if it's a new game
+                            if not existing and game_id:
+                                imported_count += 1
+                                
                         except Exception as e:
-                            print(f"DEBUG: Failed to parse line: {line[:100]}... Error: {e}")
+                            print(f"Error processing Epic game line: {e}")
                             continue
                 
-                # If no games found, try alternative parsing or show debug info
-                if not games:
-                    debug_msg = "No games found in Epic Games library.\n\n"
-                    debug_msg += "This might be because:\n"
-                    debug_msg += "1. No games are owned on Epic Games Store\n"
-                    debug_msg += "2. Legendary output format is different than expected\n"
-                    debug_msg += "3. Authentication issue\n\n"
-                    debug_msg += f"Raw output (first 1000 chars):\n{list_result.stdout[:1000]}"
-                    if len(list_result.stdout) > 1000:
-                        debug_msg += "\n...(truncated)"
-                    debug_msg += f"\n\nStderr: {list_result.stderr[:300] if list_result.stderr else 'None'}"
-                    
-                    self.frame.after(0, lambda msg=debug_msg: messagebox.showwarning("No Games Found", msg))
-                    return
+                # Schedule UI updates in main thread
+                self.update_import_status.emit(f"✅ Imported {imported_count} out of {total_games} Epic games!")
+                QTimer.singleShot(2000, lambda: self.hide_import_status.emit())  # Hide after 2 seconds
+                QTimer.singleShot(0, lambda: self.load_games())
+                QTimer.singleShot(0, lambda: show_toast(self, f"✅ Imported {imported_count} new Epic Games!"))
                 
-                # Import games to database
-                imported_count = 0
-                for app_name, game_name in games:
-                    try:
-                        self.db.add_or_update_game(
-                            appid=app_name,
-                            name=game_name,
-                            platform='Epic',
-                            playtime=0,
-                            achievements_total=0,
-                            achievements_unlocked=0,
-                            has_achievements=False
-                        )
-                        imported_count += 1
-                    except Exception as e:
-                        print(f"Failed to import game {game_name}: {e}")
-                        continue
-                
-                self.frame.after(0, lambda: messagebox.showinfo("Success", 
-                    f"Successfully imported {imported_count} Epic games!"))
-                self.frame.after(0, self.load_games)
-                
-            except subprocess.TimeoutExpired:
-                self.frame.after(0, lambda: messagebox.showerror("Error", 
-                    "Legendary command timed out. Please try again."))
+            except FileNotFoundError:
+                self.hide_import_status.emit()
+                QTimer.singleShot(0, lambda: QMessageBox.critical(self, "Error", 
+                                   "Legendary CLI not found. Please install legendary first:\npip install legendary-gl"))
             except Exception as e:
-                error_msg = str(e)
-                self.frame.after(0, lambda msg=error_msg: messagebox.showerror("Error", 
-                    f"Failed to import Epic library: {msg}"))
+                self.hide_import_status.emit()
+                QTimer.singleShot(0, lambda: QMessageBox.critical(self, "Error", f"Failed to import Epic library: {e}"))
         
         threading.Thread(target=import_in_thread, daemon=True).start()
     
-    def mark_game_hundred_percent(self):
-        """Mark selected games as 100% (only works for games with achievements)"""
-        # Determine which tree to use based on current tab or focus
-        current_tab = self.games_notebook.index(self.games_notebook.select())
-        if current_tab == 0:  # Incomplete games tab
-            tree = self.incomplete_tree
-            selection = tree.selection()
-        elif current_tab == 1:  # Completed games tab
-            tree = self.completed_tree
-            selection = tree.selection()
-        else:  # 100% games tab or other
-            incomplete_selection = self.incomplete_tree.selection()
-            completed_selection = self.completed_tree.selection()
-            if incomplete_selection:
-                tree = self.incomplete_tree
-                selection = incomplete_selection
-            elif completed_selection:
-                tree = self.completed_tree
-                selection = completed_selection
-            else:
-                messagebox.showwarning("Warning", "Please select games from Incomplete or Completed tabs to mark as 100%")
-                return
-        
-        if not selection:
-            messagebox.showwarning("Warning", "Please select one or more games to mark as 100%")
+    def select_random_game(self):
+        """Select a random game from the library and offer to launch it"""
+        # Get incomplete games only for random selection
+        incomplete_games = self.db.get_games_by_completion(completed=False)
+        if not incomplete_games:
+            show_toast(self, "ℹ️ No incomplete games found in library. Import some games first!")
             return
         
-        # Get selected games and check if they have achievements
-        selected_games = []
-        games_without_achievements = []
-        for item_id in selection:
-            item = tree.item(item_id)
-            game_name = item['text']
-            game_id = item['tags'][0]
-            
-            # Get game details from database to check achievements
-            game_details = self.db.get_games()
-            game_data = next((g for g in game_details if str(g['id']) == str(game_id)), None)
-            
-            if game_data and game_data['has_achievements'] and game_data['achievements_total'] > 0:
-                selected_games.append((game_id, game_name, game_data['achievements_total']))
-            else:
-                games_without_achievements.append(game_name)
+        random_game = random.choice(incomplete_games)
         
-        if games_without_achievements:
-            messagebox.showwarning("Warning", 
-                f"These games don't have achievements and can't be marked as 100%:\n" + 
-                "\n".join(games_without_achievements[:5]) + 
-                (f"\n... and {len(games_without_achievements) - 5} more" if len(games_without_achievements) > 5 else ""))
+        # Format playtime
+        playtime_hours = random_game['playtime'] / 60.0 if random_game['playtime'] else 0
+        playtime = f"{playtime_hours:.1f} hours" if playtime_hours else "No playtime recorded"
         
-        if not selected_games:
-            return
-        
-        # Confirm action
-        if len(selected_games) == 1:
-            confirm_msg = f"Mark '{selected_games[0][1]}' as 100% completed?\n\nThis will set achievements to {selected_games[0][2]}/{selected_games[0][2]} and mark as completed."
+        # Format achievements
+        if random_game['achievements_total'] and random_game['achievements_total'] > 0:
+            completion = (random_game['achievements_unlocked'] / random_game['achievements_total']) * 100
+            achievements = f"{random_game['achievements_unlocked']}/{random_game['achievements_total']} ({completion:.1f}%)"
         else:
-            confirm_msg = f"Mark {len(selected_games)} games as 100% completed?\n\nThis will set all achievements as unlocked and mark games as completed."
+            achievements = "No achievements"
         
-        if messagebox.askyesno("Confirm", confirm_msg):
+        # Create message box with launch option
+        message = f"� Racndom Game Selected!\n\n"
+        message += f"🎮 Game: {random_game['name']}\n"
+        message += f"🏷️ Platform: {random_game['platform']}\n"
+        message += f"⏱️ Playtime: {playtime}\n"
+        message += f"🏆 Achievements: {achievements}\n\n"
+        message += "Would you like to launch this game?"
+        
+        reply = QMessageBox.question(self, "Random Game", message,
+                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            self.launch_game(random_game)
+        else:
+            show_toast(self, f"🎲 Random game selected: {random_game['name']}")
+    
+    def launch_selected_game(self):
+        """Launch the currently selected game"""
+        # Determine which tree has the selection
+        current_item = None
+        if self.incomplete_games_tree.currentItem():
+            current_item = self.incomplete_games_tree.currentItem()
+        elif self.complete_games_tree.currentItem():
+            current_item = self.complete_games_tree.currentItem()
+        elif self.hundred_percent_tree.currentItem():
+            current_item = self.hundred_percent_tree.currentItem()
+        
+        if not current_item:
+            QMessageBox.warning(self, "Warning", "Please select a game to launch")
+            return
+        
+        game_id = current_item.data(0, Qt.ItemDataRole.UserRole)
+        
+        # Get game from database
+        cursor = self.db.conn.cursor()
+        cursor.execute("SELECT * FROM games WHERE id = ?", (game_id,))
+        game = cursor.fetchone()
+        
+        if game:
+            self.launch_game(game)
+    
+    def launch_game(self, game):
+        """Launch a game based on its platform"""
+        try:
+            if game['platform'] == 'Steam':
+                self.launch_steam_game(game['appid'])
+            elif game['platform'] == 'Epic Games':
+                self.launch_epic_game(game['appid'])
+            else:
+                QMessageBox.warning(self, "Warning", f"Launching {game['platform']} games is not supported yet")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to launch {game['name']}: {e}")
+    
+    def launch_steam_game(self, app_id):
+        """Launch a Steam game using steam:// protocol"""
+        steam_url = f"steam://launch/{app_id}"
+        webbrowser.open(steam_url)
+        show_toast(self, f"🚀 Launching Steam game (App ID: {app_id})")
+    
+    def launch_epic_game(self, app_id):
+        """Launch an Epic Games game using legendary"""
+        def launch_in_thread():
             try:
-                failed_games = []
-                for game_id, game_name, total_achievements in selected_games:
-                    try:
-                        # Update achievements to 100%
-                        cursor = self.db.conn.cursor()
-                        cursor.execute('''
-                            UPDATE games 
-                            SET achievements_unlocked = achievements_total, 
-                                is_completed = 1, 
-                                updated_at = CURRENT_TIMESTAMP 
-                            WHERE id = ?
-                        ''', (game_id,))
-                        self.db.conn.commit()
-                    except Exception as e:
-                        failed_games.append(game_name)
+                # Use legendary to launch the game
+                result = subprocess.run(['legendary', 'launch', app_id], 
+                                       capture_output=True, text=True, timeout=10)
                 
-                self.load_games()
+                if result.returncode == 0:
+                    QTimer.singleShot(0, lambda: show_toast(self, f"🚀 Launching Epic game: {app_id}"))
+                else:
+                    error_msg = result.stderr or result.stdout or "Unknown error"
+                    QTimer.singleShot(0, lambda: QMessageBox.critical(self, "Error", 
+                                       f"Failed to launch Epic game: {error_msg[:200]}"))
                 
-                # Only show error if some games failed
-                if failed_games:
-                    messagebox.showerror("Error", f"Failed to mark these games as 100%:\n" + "\n".join(failed_games))
-                    
+            except FileNotFoundError:
+                QTimer.singleShot(0, lambda: QMessageBox.critical(self, "Error", 
+                                   "Legendary CLI not found. Please install legendary first:\npip install legendary-gl"))
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to mark games as 100%: {e}")
+                QTimer.singleShot(0, lambda: QMessageBox.critical(self, "Error", f"Failed to launch Epic game: {e}"))
+        
+        threading.Thread(target=launch_in_thread, daemon=True).start()
     
     def clear_steam_games(self):
-        """Clear all Steam Games entries from the database"""
-        # Confirm the action
-        result = messagebox.askyesno("Confirm Clear", 
-                                   "Are you sure you want to remove ALL Steam Games from your library?\n\n"
-                                   "This will delete all Steam Games entries including completion status.\n"
-                                   "This action cannot be undone.")
+        """Clear all Steam games from database"""
+        reply = QMessageBox.question(self, "Confirm", "Delete all Steam games from library?",
+                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         
-        if result:
+        if reply == QMessageBox.StandardButton.Yes:
             try:
                 self.db.delete_all_games('Steam')
                 self.load_games()
-                messagebox.showinfo("Success", "All Steam Games entries have been removed from your library.")
+                show_toast(self, "✅ Steam games cleared successfully!")
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to clear Steam Games: {e}")
+                QMessageBox.critical(self, "Error", f"Failed to clear Steam games: {e}")
     
     def clear_epic_games(self):
-        """Clear all Epic Games entries from the database"""
-        # Confirm the action
-        result = messagebox.askyesno("Confirm Clear", 
-                                   "Are you sure you want to remove ALL Epic Games from your library?\n\n"
-                                   "This will delete all Epic Games entries including completion status.\n"
-                                   "This action cannot be undone.")
+        """Clear all Epic Games from database"""
+        reply = QMessageBox.question(self, "Confirm", "Delete all Epic Games from library?",
+                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         
-        if result:
+        if reply == QMessageBox.StandardButton.Yes:
             try:
-                self.db.delete_all_games('Epic')
+                # Clear both "Epic" and "Epic Games" to handle any inconsistencies
+                cursor = self.db.conn.cursor()
+                cursor.execute("DELETE FROM games WHERE platform IN ('Epic', 'Epic Games')")
+                self.db.conn.commit()
+                
                 self.load_games()
-                messagebox.showinfo("Success", "All Epic Games entries have been removed from your library.")
+                show_toast(self, "✅ Epic Games cleared successfully!")
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to clear Epic Games: {e}")
-    
-    def select_random_game(self):
-        """Select a random game from the incomplete games library"""
-        games = []
-        for item in self.incomplete_tree.get_children():
-            games.append(self.incomplete_tree.item(item))
-        
-        if not games:
-            messagebox.showinfo("Info", "No incomplete games in library")
-            return
-        
-        # Select random game
-        random_game = random.choice(games)
-        game_name = random_game['text']
-        platform = random_game['values'][0]
-        
-        # Switch to incomplete games tab and highlight the selected game
-        self.games_notebook.select(0)  # Select incomplete games tab
-        for item in self.incomplete_tree.get_children():
-            if self.incomplete_tree.item(item)['text'] == game_name:
-                self.incomplete_tree.selection_set(item)
-                self.incomplete_tree.focus(item)
-                self.incomplete_tree.see(item)
-                break
-        
-        # Show message
-        result = messagebox.askyesno("Random Game Selected", 
-                                   f"Selected: {game_name} ({platform})\n\nWould you like to launch it?")
-        if result:
-            self.launch_selected_game()
-    
-    def launch_selected_game(self, event=None):
-        """Launch the selected game"""
-        # Determine which tree has the selection
-        current_tab = self.games_notebook.index(self.games_notebook.select())
-        if current_tab == 0:  # Incomplete games tab
-            tree = self.incomplete_tree
-        else:  # Completed games tab
-            tree = self.completed_tree
-        
-        selection = tree.selection()
-        if not selection:
-            messagebox.showwarning("Warning", "Please select a game to launch")
-            return
-        
-        item = tree.item(selection[0])
-        game_name = item['text']
-        appid = item['tags'][1]
-        platform = item['tags'][2]
-        
-        try:
-            if platform == 'Steam':
-                # Launch via Steam protocol
-                import webbrowser
-                webbrowser.open(f"steam://launch/{appid}")
-                messagebox.showinfo("Success", f"Launching {game_name} via Steam...")
-                
-            elif platform == 'Epic':
-                # Launch via legendary
-                subprocess.Popen(['legendary', 'launch', appid])
-                messagebox.showinfo("Success", f"Launching {game_name} via Legendary...")
-                
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to launch {game_name}: {e}")
-    
-    def show_context_menu(self, event, tab_type):
-        """Show context menu on right click"""
-        if tab_type == "incomplete":
-            tree = self.incomplete_tree
-            menu = self.incomplete_menu
-        elif tab_type == "completed":
-            tree = self.completed_tree
-            menu = self.completed_menu
-        else:  # hundred_percent
-            tree = self.hundred_percent_tree
-            menu = self.hundred_percent_menu
-        
-        # Handle selection for context menu
-        item = tree.identify_row(event.y)
-        if item:
-            # If the clicked item is not in current selection, select only it
-            # If it's already selected, keep the current multi-selection
-            current_selection = tree.selection()
-            if item not in current_selection:
-                tree.selection_set(item)
-            menu.post(event.x_root, event.y_root)
-    
-    def show_game_details(self):
-        """Show detailed information about selected game"""
-        # Determine which tree has the selection
-        current_tab = self.games_notebook.index(self.games_notebook.select())
-        if current_tab == 0:  # Incomplete games tab
-            tree = self.incomplete_tree
-        else:  # Completed games tab
-            tree = self.completed_tree
-        
-        selection = tree.selection()
-        if not selection:
-            return
-        
-        item = tree.item(selection[0])
-        game_id = item['tags'][0]
-        
-        # Get full game data from database
-        cursor = self.db.conn.cursor()
-        cursor.execute("SELECT * FROM games WHERE id = ?", (game_id,))
-        game = cursor.fetchone()
-        
-        if not game:
-            return
-        
-        # Create details window
-        details_window = tk.Toplevel(self.frame)
-        details_window.title(f"Game Details - {game['name']}")
-        details_window.geometry("500x400")
-        
-        # Game info
-        info_frame = ttk.LabelFrame(details_window, text="Game Information", padding=10)
-        info_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # Name
-        ttk.Label(info_frame, text="Name:", font=("Arial", 10, "bold")).grid(row=0, column=0, sticky=tk.W, pady=2)
-        ttk.Label(info_frame, text=game['name']).grid(row=0, column=1, sticky=tk.W, padx=(10, 0), pady=2)
-        
-        # Platform
-        ttk.Label(info_frame, text="Platform:", font=("Arial", 10, "bold")).grid(row=1, column=0, sticky=tk.W, pady=2)
-        ttk.Label(info_frame, text=game['platform']).grid(row=1, column=1, sticky=tk.W, padx=(10, 0), pady=2)
-        
-        # App ID
-        ttk.Label(info_frame, text="App ID:", font=("Arial", 10, "bold")).grid(row=2, column=0, sticky=tk.W, pady=2)
-        ttk.Label(info_frame, text=game['appid']).grid(row=2, column=1, sticky=tk.W, padx=(10, 0), pady=2)
-        
-        # Playtime
-        playtime_hours = game['playtime'] / 60 if game['playtime'] else 0
-        ttk.Label(info_frame, text="Playtime:", font=("Arial", 10, "bold")).grid(row=3, column=0, sticky=tk.W, pady=2)
-        ttk.Label(info_frame, text=f"{playtime_hours:.1f} hours").grid(row=3, column=1, sticky=tk.W, padx=(10, 0), pady=2)
-        
-        # Achievements
-        if game['has_achievements']:
-            ttk.Label(info_frame, text="Achievements:", font=("Arial", 10, "bold")).grid(row=4, column=0, sticky=tk.W, pady=2)
-            achievement_text = f"{game['achievements_unlocked']}/{game['achievements_total']}"
-            if game['achievements_total'] > 0:
-                percentage = (game['achievements_unlocked'] / game['achievements_total']) * 100
-                achievement_text += f" ({percentage:.1f}%)"
-            ttk.Label(info_frame, text=achievement_text).grid(row=4, column=1, sticky=tk.W, padx=(10, 0), pady=2)
-        
-        # Last played
-        if game['last_played']:
-            ttk.Label(info_frame, text="Last Played:", font=("Arial", 10, "bold")).grid(row=5, column=0, sticky=tk.W, pady=2)
-            ttk.Label(info_frame, text=game['last_played']).grid(row=5, column=1, sticky=tk.W, padx=(10, 0), pady=2)
-        
-        # Buttons
-        button_frame = ttk.Frame(details_window)
-        button_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        ttk.Button(button_frame, text="Launch Game", 
-                  command=lambda: self.launch_game_by_id(game_id)).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(button_frame, text="Close", command=details_window.destroy).pack(side=tk.RIGHT)
-    
-    def launch_game_by_id(self, game_id):
-        """Launch game by database ID"""
-        cursor = self.db.conn.cursor()
-        cursor.execute("SELECT * FROM games WHERE id = ?", (game_id,))
-        game = cursor.fetchone()
-        
-        if not game:
-            return
-        
-        try:
-            if game['platform'] == 'Steam':
-                steam_path = self.db.get_setting('steam_path', r"C:\Program Files (x86)\Steam\steam.exe")
-                subprocess.Popen([steam_path, f"-applaunch", game['appid']])
-                messagebox.showinfo("Success", f"Launching {game['name']} via Steam...")
-                
-            elif game['platform'] == 'Epic':
-                subprocess.Popen(['legendary', 'launch', game['appid']])
-                messagebox.showinfo("Success", f"Launching {game['name']} via Legendary...")
-                
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to launch {game['name']}: {e}")
+                QMessageBox.critical(self, "Error", f"Failed to clear Epic Games: {e}")

@@ -170,7 +170,7 @@ Summary:"""
         """Automatically send unsent news to Discord"""
         try:
             webhook_url = self.db.get_setting('discord_webhook_url')
-            auto_send = self.db.get_setting('auto_send_news', 'true').lower() == 'true'
+            auto_send = str(self.db.get_setting('auto_send_news', 'true')).lower() == 'true'
             
             if not webhook_url or not auto_send:
                 return
@@ -434,7 +434,7 @@ Summary:"""
             news_webhook_url = self.db.get_setting('discord_webhook_url')
             webhook_url = task_webhook_url or news_webhook_url
             
-            auto_reminders = self.db.get_setting('auto_task_reminders', 'true').lower() == 'true'
+            auto_reminders = str(self.db.get_setting('auto_task_reminders', 'true')).lower() == 'true'
             
             if not webhook_url or not auto_reminders:
                 self.logger.info("Task reminders disabled or no webhook configured")

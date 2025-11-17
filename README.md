@@ -1,6 +1,6 @@
 # Personal News & Gaming Dashboard
 
-A Python-based desktop application that aggregates news, manages game libraries with completion tracking, handles to-do tasks, and stores configuration locally. Built with Tkinter for a native Windows experience with advanced game management features.
+A Python-based desktop application that aggregates news, manages game libraries with completion tracking, handles to-do tasks, and stores configuration locally. Built with PyQt6 for a modern cross-platform experience with advanced game management features.
 
 ## Features
 
@@ -198,7 +198,7 @@ This project is open source. Feel free to modify and distribute as needed.
 
 ## Acknowledgments
 
-- Built with Python and Tkinter
+- Built with Python and PyQt6
 - Uses Google Gemini API for news summarization
 - Integrates with Steam Web API and Discord webhooks
 - Epic Games support via Legendary CLI

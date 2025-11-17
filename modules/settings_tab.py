@@ -3,26 +3,172 @@ Settings Tab
 Handles configuration of API keys, webhooks, and other settings
 """
 
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog, scrolledtext
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
+                            QTabWidget, QLineEdit, QTextEdit, QLabel, QFrame,
+                            QMessageBox, QFileDialog, QFormLayout, QGroupBox,
+                            QComboBox, QCheckBox, QScrollArea)
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtGui import QFont
+
+def show_toast(parent, message):
+    """Show a simple status message in the status bar instead of toast to avoid threading issues"""
+    try:
+        # Use the main_window reference from the parent tab
+        if hasattr(parent, 'main_window') and hasattr(parent.main_window, 'show_success_message'):
+            parent.main_window.show_success_message(message)
+        else:
+            print(f"Status: {message}")  # Fallback to console
+    except Exception as e:
+        print(f"Status: {message}")  # Fallback to console
 import json
 import requests
 import os
+import threading
+import webbrowser
 
-class SettingsTab:
-    def __init__(self, parent, db):
-        self.parent = parent
+class SettingsTab(QWidget):
+    def __init__(self, db, main_window):
+        super().__init__()
         self.db = db
-        
-        self.frame = ttk.Frame(parent)
-        self.create_widgets()
+        self.main_window = main_window
+        self.setup_ui()
         self.load_settings()
     
-    def create_widgets(self):
-        """Create the settings tab widgets"""
-        # Create notebook for settings categories
-        self.settings_notebook = ttk.Notebook(self.frame)
-        self.settings_notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+    def setup_ui(self):
+        """Create the modern PyQt settings tab UI"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Apply modern styling
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #3c3c3c;
+                color: #ffffff;
+            }
+            QPushButton {
+                background-color: #0078d4;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-weight: bold;
+                min-width: 100px;
+            }
+            QPushButton:hover {
+                background-color: #106ebe;
+            }
+            QPushButton:pressed {
+                background-color: #005a9e;
+            }
+            QPushButton.test {
+                background-color: #107c10;
+            }
+            QPushButton.test:hover {
+                background-color: #0e6b0e;
+            }
+            QLineEdit {
+                background-color: #404040;
+                border: 2px solid #555555;
+                border-radius: 6px;
+                padding: 8px;
+                color: white;
+                min-height: 20px;
+            }
+            QLineEdit:focus {
+                border-color: #0078d4;
+            }
+            QLineEdit[echoMode="2"] {
+                lineedit-password-character: 42;
+            }
+            QTextEdit {
+                background-color: #404040;
+                border: 2px solid #555555;
+                border-radius: 8px;
+                color: white;
+                padding: 10px;
+            }
+            QComboBox {
+                background-color: #404040;
+                border: 2px solid #555555;
+                border-radius: 6px;
+                padding: 8px;
+                color: white;
+                min-width: 150px;
+            }
+            QComboBox:hover {
+                border-color: #0078d4;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid #ffffff;
+            }
+            QTabWidget::pane {
+                border: 2px solid #555555;
+                border-radius: 8px;
+                background-color: #404040;
+            }
+            QTabBar::tab {
+                background-color: #505050;
+                color: #ffffff;
+                padding: 12px 20px;
+                margin-right: 2px;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                min-width: 100px;
+            }
+            QTabBar::tab:selected {
+                background-color: #0078d4;
+            }
+            QTabBar::tab:hover {
+                background-color: #606060;
+            }
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #555555;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 10px 0 10px;
+            }
+            QCheckBox {
+                color: white;
+                spacing: 10px;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+                border-radius: 3px;
+                border: 2px solid #555555;
+                background-color: #404040;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #0078d4;
+                border-color: #0078d4;
+            }
+            QCheckBox::indicator:checked {
+                color: white;
+                font-weight: bold;
+            }
+            QLabel {
+                color: #ffffff;
+            }
+            QScrollArea {
+                border: none;
+                background-color: #3c3c3c;
+            }
+        """)
+        
+        # Create tab widget
+        self.tab_widget = QTabWidget()
         
         # API Keys tab
         self.create_api_tab()
@@ -35,354 +181,406 @@ class SettingsTab:
         
         # Import/Export tab
         self.create_import_export_tab()
+        
+        layout.addWidget(self.tab_widget)
     
     def create_api_tab(self):
         """Create API keys configuration tab"""
-        api_frame = ttk.Frame(self.settings_notebook)
-        self.settings_notebook.add(api_frame, text="API Keys")
+        api_widget = QWidget()
+        scroll = QScrollArea()
+        scroll.setWidget(api_widget)
+        scroll.setWidgetResizable(True)
         
-        # Main container with scrollbar
-        canvas = tk.Canvas(api_frame)
-        scrollbar = ttk.Scrollbar(api_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
+        layout = QVBoxLayout(api_widget)
+        layout.setSpacing(30)
+        layout.setContentsMargins(20, 20, 20, 20)
         
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
+        # Gemini API Section
+        gemini_group = QGroupBox("🤖 Google Gemini API")
+        gemini_layout = QFormLayout(gemini_group)
+        gemini_layout.setSpacing(15)
+        gemini_layout.setContentsMargins(15, 20, 15, 15)
         
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
+        self.gemini_key_edit = QLineEdit()
+        self.gemini_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        gemini_layout.addRow("API Key:", self.gemini_key_edit)
         
-        # Create horizontal layout for API sections
-        api_columns_frame = ttk.Frame(scrollable_frame)
-        api_columns_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.gemini_model_combo = QComboBox()
+        self.gemini_model_combo.addItems([
+            "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash",
+            "gemini-2.0-flash-lite", "gemini-2.5-flash-lite"
+        ])
+        gemini_layout.addRow("Model:", self.gemini_model_combo)
         
-        # Left column - Gemini API
-        left_column = ttk.Frame(api_columns_frame)
-        left_column.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+        gemini_buttons = QFrame()
+        gemini_btn_layout = QHBoxLayout(gemini_buttons)
+        gemini_btn_layout.setContentsMargins(0, 0, 0, 0)
         
-        gemini_frame = ttk.LabelFrame(left_column, text="Google Gemini API", padding=10)
-        gemini_frame.pack(fill=tk.BOTH, expand=True)
+        test_gemini_btn = QPushButton("🧪 Test")
+        test_gemini_btn.setProperty("class", "test")
+        test_gemini_btn.clicked.connect(self.test_gemini)
+        gemini_btn_layout.addWidget(test_gemini_btn)
         
-        ttk.Label(gemini_frame, text="API Key:").pack(anchor=tk.W)
-        self.gemini_key_var = tk.StringVar()
-        gemini_entry = ttk.Entry(gemini_frame, textvariable=self.gemini_key_var, width=40, show="*")
-        gemini_entry.pack(fill=tk.X, pady=(5, 10))
+        save_gemini_btn = QPushButton("💾 Save")
+        save_gemini_btn.clicked.connect(self.save_gemini)
+        gemini_btn_layout.addWidget(save_gemini_btn)
         
-        # Model selection
-        model_frame = ttk.Frame(gemini_frame)
-        model_frame.pack(fill=tk.X, pady=(0, 10))
+        gemini_btn_layout.addStretch()
+        gemini_layout.addRow(gemini_buttons)
         
-        ttk.Label(model_frame, text="Model:").pack(anchor=tk.W)
-        self.gemini_model_var = tk.StringVar(value="gemini-2.5-flash")
+        info_label = QLabel("Get your API key from: https://makersuite.google.com/app/apikey")
+        info_label.setStyleSheet("color: #0078d4; font-size: 10px;")
+        gemini_layout.addRow(info_label)
         
-        # Define models with their quotas (RPM/TPM/RPD)
-        self.gemini_models = {
-            "gemini-2.0-flash-live": {"name": "Gemini 2.0 Flash Live", "rpm": "Unlimited", "tpm": "1M", "rpd": "Unlimited"},
-            "gemini-2.5-flash-live": {"name": "Gemini 2.5 Flash Live", "rpm": "Unlimited", "tpm": "1M", "rpd": "Unlimited"},
-            "gemini-2.5-flash-native-audio-dialog": {"name": "Gemini 2.5 Flash Audio Dialog", "rpm": "Unlimited", "tpm": "1M", "rpd": "Unlimited"},
-            "gemini-2.0-flash-lite": {"name": "Gemini 2.0 Flash Lite", "rpm": "300", "tpm": "1M", "rpd": "200"},
-            "gemini-2.0-flash": {"name": "Gemini 2.0 Flash", "rpm": "150", "tpm": "1M", "rpd": "200"},
-            "gemini-2.5-flash-lite": {"name": "Gemini 2.5 Flash Lite", "rpm": "150", "tpm": "250K", "rpd": "1K"},
-            "gemini-2.5-flash-tts": {"name": "Gemini 2.5 Flash TTS", "rpm": "30", "tpm": "10K", "rpd": "15"},
-            "gemini-2.5-flash": {"name": "Gemini 2.5 Flash", "rpm": "100", "tpm": "250K", "rpd": "250"},
-            "gemini-2.5-pro": {"name": "Gemini 2.5 Pro", "rpm": "20", "tpm": "125K", "rpd": "50"},
-            "gemini-robotics-er-1.5-preview": {"name": "Gemini Robotics ER 1.5", "rpm": "100", "tpm": "250K", "rpd": "250"},
-            "learnlm-2.0-flash-experimental": {"name": "LearnLM 2.0 Flash", "rpm": "15", "tpm": "N/A", "rpd": "1.5K"},
-            "gemini-2.0-flash-exp": {"name": "Gemini 2.0 Flash Exp", "rpm": "N/A", "tpm": "N/A", "rpd": "50"}
-        }
+        layout.addWidget(gemini_group)
         
-        self.model_combo = ttk.Combobox(model_frame, textvariable=self.gemini_model_var, 
-                                       values=list(self.gemini_models.keys()), 
-                                       state="readonly", width=30)
-        self.model_combo.pack(fill=tk.X, pady=(5, 0))
-        self.model_combo.bind("<<ComboboxSelected>>", self.update_quota_display)
+        # Steam API Section
+        steam_group = QGroupBox("🎮 Steam Web API")
+        steam_layout = QFormLayout(steam_group)
+        steam_layout.setSpacing(15)
+        steam_layout.setContentsMargins(15, 20, 15, 15)
         
-        # Quota display
-        self.quota_label = ttk.Label(gemini_frame, text="", foreground="darkgreen", font=("Arial", 9))
-        self.quota_label.pack(anchor=tk.W, pady=(5, 0))
+        self.steam_key_edit = QLineEdit()
+        self.steam_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        steam_layout.addRow("API Key:", self.steam_key_edit)
         
-        # Usage display
-        self.usage_label = ttk.Label(gemini_frame, text="", foreground="darkblue", font=("Arial", 9))
-        self.usage_label.pack(anchor=tk.W, pady=(0, 10))
+        self.steam_id_edit = QLineEdit()
+        steam_layout.addRow("Steam ID:", self.steam_id_edit)
         
-        gemini_buttons = ttk.Frame(gemini_frame)
-        gemini_buttons.pack(fill=tk.X)
-        ttk.Button(gemini_buttons, text="Test Connection", command=self.test_gemini).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(gemini_buttons, text="Save", command=self.save_gemini).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(gemini_buttons, text="Refresh Usage", command=self.refresh_usage).pack(side=tk.LEFT)
+        steam_buttons = QFrame()
+        steam_btn_layout = QHBoxLayout(steam_buttons)
+        steam_btn_layout.setContentsMargins(0, 0, 0, 0)
         
-        ttk.Label(gemini_frame, text="Get your API key from: https://makersuite.google.com/app/apikey", 
-                 foreground="blue").pack(anchor=tk.W, pady=(5, 0))
+        test_steam_btn = QPushButton("🧪 Test")
+        test_steam_btn.setProperty("class", "test")
+        test_steam_btn.clicked.connect(self.test_steam)
+        steam_btn_layout.addWidget(test_steam_btn)
         
-        # Update quota display initially
-        self.update_quota_display()
+        save_steam_btn = QPushButton("💾 Save")
+        save_steam_btn.clicked.connect(self.save_steam)
+        steam_btn_layout.addWidget(save_steam_btn)
         
-        # Middle column - Steam API
-        middle_column = ttk.Frame(api_columns_frame)
-        middle_column.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 5))
+        steam_btn_layout.addStretch()
+        steam_layout.addRow(steam_buttons)
         
-        steam_frame = ttk.LabelFrame(middle_column, text="Steam Web API", padding=10)
-        steam_frame.pack(fill=tk.BOTH, expand=True)
+        steam_info = QLabel("Get API key: steamcommunity.com/dev/apikey\nFind Steam ID: steamidfinder.com")
+        steam_info.setStyleSheet("color: #0078d4; font-size: 10px;")
+        steam_layout.addRow(steam_info)
         
-        ttk.Label(steam_frame, text="API Key:").pack(anchor=tk.W)
-        self.steam_key_var = tk.StringVar()
-        steam_key_entry = ttk.Entry(steam_frame, textvariable=self.steam_key_var, width=40, show="*")
-        steam_key_entry.pack(fill=tk.X, pady=(5, 10))
+        layout.addWidget(steam_group)
         
-        ttk.Label(steam_frame, text="Steam ID:").pack(anchor=tk.W)
-        self.steam_id_var = tk.StringVar()
-        steam_id_entry = ttk.Entry(steam_frame, textvariable=self.steam_id_var, width=40)
-        steam_id_entry.pack(fill=tk.X, pady=(5, 10))
+        # Epic Games Section
+        epic_group = QGroupBox("🎯 Epic Games (Legendary)")
+        epic_layout = QFormLayout(epic_group)
+        epic_layout.setSpacing(15)
+        epic_layout.setContentsMargins(15, 20, 15, 15)
         
-        steam_buttons = ttk.Frame(steam_frame)
-        steam_buttons.pack(fill=tk.X, pady=(0, 10))
-        ttk.Button(steam_buttons, text="Test", command=self.test_steam).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(steam_buttons, text="Save", command=self.save_steam).pack(side=tk.LEFT)
+        self.epic_auth_edit = QLineEdit()
+        self.epic_auth_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        epic_layout.addRow("Authorization Code:", self.epic_auth_edit)
         
-        ttk.Label(steam_frame, text="Get API key:", foreground="blue").pack(anchor=tk.W)
-        ttk.Label(steam_frame, text="steamcommunity.com/dev/apikey", foreground="blue", font=("Arial", 8)).pack(anchor=tk.W)
-        ttk.Label(steam_frame, text="Find Steam ID:", foreground="blue").pack(anchor=tk.W, pady=(5, 0))
-        ttk.Label(steam_frame, text="steamidfinder.com", foreground="blue", font=("Arial", 8)).pack(anchor=tk.W)
+        epic_buttons = QFrame()
+        epic_btn_layout = QHBoxLayout(epic_buttons)
+        epic_btn_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Right column - Epic Games Authentication
-        right_column = ttk.Frame(api_columns_frame)
-        right_column.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
+        get_code_btn = QPushButton("🔗 Get Code")
+        get_code_btn.clicked.connect(self.get_epic_auth)
+        epic_btn_layout.addWidget(get_code_btn)
         
-        epic_frame = ttk.LabelFrame(right_column, text="Epic Games (Legendary)", padding=10)
-        epic_frame.pack(fill=tk.BOTH, expand=True)
+        test_epic_btn = QPushButton("🧪 Test")
+        test_epic_btn.setProperty("class", "test")
+        test_epic_btn.clicked.connect(self.test_epic)
+        epic_btn_layout.addWidget(test_epic_btn)
         
-        ttk.Label(epic_frame, text="Authorization Code:").pack(anchor=tk.W)
-        self.epic_auth_var = tk.StringVar()
-        epic_auth_entry = ttk.Entry(epic_frame, textvariable=self.epic_auth_var, width=40, show="*")
-        epic_auth_entry.pack(fill=tk.X, pady=(5, 10))
+        save_epic_btn = QPushButton("💾 Save")
+        save_epic_btn.clicked.connect(self.save_epic)
+        epic_btn_layout.addWidget(save_epic_btn)
         
-        epic_buttons = ttk.Frame(epic_frame)
-        epic_buttons.pack(fill=tk.X, pady=(0, 10))
-        ttk.Button(epic_buttons, text="Get Code", command=self.get_epic_auth).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(epic_buttons, text="Test", command=self.test_epic).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(epic_buttons, text="Save", command=self.save_epic).pack(side=tk.LEFT)
+        epic_btn_layout.addStretch()
+        epic_layout.addRow(epic_buttons)
         
-        ttk.Label(epic_frame, text="1. Click 'Get Code'", foreground="blue", font=("Arial", 9)).pack(anchor=tk.W)
-        ttk.Label(epic_frame, text="2. Login to Epic Games", foreground="blue", font=("Arial", 9)).pack(anchor=tk.W)
-        ttk.Label(epic_frame, text="3. Copy authorizationCode", foreground="blue", font=("Arial", 9)).pack(anchor=tk.W)
-        ttk.Label(epic_frame, text="4. Paste above & Save", foreground="blue", font=("Arial", 9)).pack(anchor=tk.W)
+        epic_info = QLabel("1. Click 'Get Code' → Login to Epic Games\n2. Copy authorizationCode from JSON\n3. Paste above & Save")
+        epic_info.setStyleSheet("color: #0078d4; font-size: 10px;")
+        epic_layout.addRow(epic_info)
         
-        ttk.Label(epic_frame, text="1. Click 'Get Auth Code' to open Epic Games login", 
-                 foreground="blue").pack(anchor=tk.W, pady=(5, 0))
-        ttk.Label(epic_frame, text="2. Login and copy the 'authorizationCode' from the JSON response", 
-                 foreground="blue").pack(anchor=tk.W)
-        ttk.Label(epic_frame, text="3. Paste the code above and click 'Save'", 
-                 foreground="blue").pack(anchor=tk.W)
+        layout.addWidget(epic_group)
+        layout.addStretch()
         
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        self.tab_widget.addTab(scroll, "🔑 API Keys")
     
     def create_discord_tab(self):
         """Create Discord webhook configuration tab"""
-        discord_frame = ttk.Frame(self.settings_notebook)
-        self.settings_notebook.add(discord_frame, text="Discord")
+        discord_widget = QWidget()
+        scroll = QScrollArea()
+        scroll.setWidget(discord_widget)
+        scroll.setWidgetResizable(True)
         
-        # News Webhook URL
-        news_webhook_frame = ttk.LabelFrame(discord_frame, text="News Webhook", padding=10)
-        news_webhook_frame.pack(fill=tk.X, padx=10, pady=10)
+        layout = QVBoxLayout(discord_widget)
+        layout.setSpacing(25)
+        layout.setContentsMargins(20, 20, 20, 20)
         
-        ttk.Label(news_webhook_frame, text="News Webhook URL:").pack(anchor=tk.W)
-        self.webhook_url_var = tk.StringVar()
-        news_webhook_entry = ttk.Entry(news_webhook_frame, textvariable=self.webhook_url_var, width=80)
-        news_webhook_entry.pack(fill=tk.X, pady=(5, 10))
+        # News Webhook Section
+        news_group = QGroupBox("📰 News Webhook")
+        news_layout = QFormLayout(news_group)
+        news_layout.setSpacing(18)
+        news_layout.setContentsMargins(20, 25, 20, 20)
         
-        news_webhook_buttons = ttk.Frame(news_webhook_frame)
-        news_webhook_buttons.pack(fill=tk.X)
-        ttk.Button(news_webhook_buttons, text="Test News Webhook", command=self.test_webhook).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(news_webhook_buttons, text="Save", command=self.save_webhook).pack(side=tk.LEFT)
+        self.news_webhook_edit = QLineEdit()
+        news_layout.addRow("Webhook URL:", self.news_webhook_edit)
         
-        # Task Reminders Webhook URL
-        task_webhook_frame = ttk.LabelFrame(discord_frame, text="Task Reminders Webhook", padding=10)
-        task_webhook_frame.pack(fill=tk.X, padx=10, pady=10)
+        news_buttons = QFrame()
+        news_btn_layout = QHBoxLayout(news_buttons)
+        news_btn_layout.setContentsMargins(0, 0, 0, 0)
         
-        ttk.Label(task_webhook_frame, text="Task Reminders Webhook URL:").pack(anchor=tk.W)
-        self.task_webhook_url_var = tk.StringVar()
-        task_webhook_entry = ttk.Entry(task_webhook_frame, textvariable=self.task_webhook_url_var, width=80)
-        task_webhook_entry.pack(fill=tk.X, pady=(5, 10))
+        test_news_btn = QPushButton("🧪 Test")
+        test_news_btn.setProperty("class", "test")
+        test_news_btn.clicked.connect(self.test_webhook)
+        news_btn_layout.addWidget(test_news_btn)
         
-        task_webhook_buttons = ttk.Frame(task_webhook_frame)
-        task_webhook_buttons.pack(fill=tk.X)
-        ttk.Button(task_webhook_buttons, text="Test Task Webhook", command=self.test_task_webhook).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(task_webhook_buttons, text="Test Auto-Reminders", command=self.test_auto_reminders).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(task_webhook_buttons, text="Save", command=self.save_task_webhook).pack(side=tk.LEFT)
+        save_news_btn = QPushButton("💾 Save")
+        save_news_btn.clicked.connect(self.save_webhook)
+        news_btn_layout.addWidget(save_news_btn)
         
-        # Discord User ID for pings
-        user_id_frame = ttk.LabelFrame(discord_frame, text="Discord Notifications", padding=10)
-        user_id_frame.pack(fill=tk.X, padx=10, pady=10)
+        news_btn_layout.addStretch()
+        news_layout.addRow(news_buttons)
         
-        ttk.Label(user_id_frame, text="Your Discord User ID (for pings):").pack(anchor=tk.W)
-        self.discord_user_id_var = tk.StringVar()
-        user_id_entry = ttk.Entry(user_id_frame, textvariable=self.discord_user_id_var, width=30)
-        user_id_entry.pack(fill=tk.X, pady=(5, 10))
+        layout.addWidget(news_group)
         
-        user_id_buttons = ttk.Frame(user_id_frame)
-        user_id_buttons.pack(fill=tk.X)
-        ttk.Button(user_id_buttons, text="Save User ID", command=self.save_discord_user_id).pack(side=tk.LEFT)
+        # Task Webhook Section
+        task_group = QGroupBox("✅ Task Reminders Webhook")
+        task_layout = QFormLayout(task_group)
+        task_layout.setSpacing(18)
+        task_layout.setContentsMargins(20, 25, 20, 20)
         
-        # Auto-send settings
-        auto_send_frame = ttk.LabelFrame(discord_frame, text="Automatic Notifications", padding=10)
-        auto_send_frame.pack(fill=tk.X, padx=10, pady=10)
+        self.task_webhook_edit = QLineEdit()
+        task_layout.addRow("Webhook URL:", self.task_webhook_edit)
         
-        self.auto_send_news_var = tk.BooleanVar()
-        ttk.Checkbutton(auto_send_frame, text="Auto-send news updates every hour", 
-                       variable=self.auto_send_news_var, command=self.save_auto_settings).pack(anchor=tk.W)
+        task_buttons = QFrame()
+        task_btn_layout = QHBoxLayout(task_buttons)
+        task_btn_layout.setContentsMargins(0, 0, 0, 0)
         
-        self.auto_task_reminders_var = tk.BooleanVar()
-        ttk.Checkbutton(auto_send_frame, text="Auto-send task reminders daily at 9 AM", 
-                       variable=self.auto_task_reminders_var, command=self.save_auto_settings).pack(anchor=tk.W)
+        test_task_btn = QPushButton("🧪 Test")
+        test_task_btn.setProperty("class", "test")
+        test_task_btn.clicked.connect(self.test_task_webhook)
+        task_btn_layout.addWidget(test_task_btn)
         
-        # Instructions for auto-reminders
-        reminder_info = ttk.Label(auto_send_frame, 
-                                 text="• Task reminders will be sent automatically for overdue and due-today tasks\n"
-                                      "• Uses separate task webhook if configured, otherwise falls back to news webhook\n"
-                                      "• Test the system using the 'Test Auto-Reminders' button above",
-                                 justify=tk.LEFT, foreground="darkblue", font=("Arial", 9))
-        reminder_info.pack(anchor=tk.W, pady=(5, 0))
+        test_auto_btn = QPushButton("🤖 Test Auto-Reminders")
+        test_auto_btn.setProperty("class", "test")
+        test_auto_btn.clicked.connect(self.test_auto_reminders)
+        task_btn_layout.addWidget(test_auto_btn)
         
-        # Instructions for getting user ID
-        instructions_text = """How to get your Discord User ID:
-1. Enable Developer Mode in Discord Settings → Advanced
-2. Right-click your username/avatar in any chat
-3. Click "Copy User ID"
-4. Paste the ID above and save"""
+        save_task_btn = QPushButton("💾 Save")
+        save_task_btn.clicked.connect(self.save_task_webhook)
+        task_btn_layout.addWidget(save_task_btn)
         
-        ttk.Label(user_id_frame, text=instructions_text, justify=tk.LEFT, foreground="blue", font=("Arial", 9)).pack(anchor=tk.W, pady=(10, 0))
+        task_btn_layout.addStretch()
+        task_layout.addRow(task_buttons)
+        
+        layout.addWidget(task_group)
+        
+        # User ID Section
+        user_group = QGroupBox("👤 Discord Notifications")
+        user_layout = QFormLayout(user_group)
+        user_layout.setSpacing(18)
+        user_layout.setContentsMargins(20, 25, 20, 20)
+        
+        self.discord_user_id_edit = QLineEdit()
+        user_layout.addRow("Your Discord User ID:", self.discord_user_id_edit)
+        
+        save_user_btn = QPushButton("💾 Save User ID")
+        save_user_btn.clicked.connect(self.save_discord_user_id)
+        user_layout.addRow(save_user_btn)
+        
+        user_info = QLabel("How to get User ID:\n1. Enable Developer Mode in Discord\n2. Right-click your username\n3. Click 'Copy User ID'")
+        user_info.setStyleSheet("color: #0078d4; font-size: 10px;")
+        user_layout.addRow(user_info)
+        
+        layout.addWidget(user_group)
+        
+        # Auto Settings Section
+        auto_group = QGroupBox("🤖 Automatic Notifications")
+        auto_layout = QVBoxLayout(auto_group)
+        auto_layout.setSpacing(15)
+        auto_layout.setContentsMargins(20, 25, 20, 20)
+        
+        self.auto_send_news_check = QCheckBox("Auto-send news updates every hour")
+        self.auto_send_news_check.stateChanged.connect(self.save_auto_settings)
+        auto_layout.addWidget(self.auto_send_news_check)
+        
+        self.auto_task_reminders_check = QCheckBox("Auto-send task reminders daily at 9 AM")
+        self.auto_task_reminders_check.stateChanged.connect(self.save_auto_settings)
+        auto_layout.addWidget(self.auto_task_reminders_check)
+        
+        auto_info = QLabel("• Task reminders sent for overdue and due-today tasks\n• Uses task webhook if configured, otherwise news webhook\n• Test the system using buttons above")
+        auto_info.setStyleSheet("color: #0078d4; font-size: 10px; margin-top: 15px;")
+        auto_layout.addWidget(auto_info)
+        
+        layout.addWidget(auto_group)
         
         # Instructions
-        instructions = ttk.LabelFrame(discord_frame, text="How to get Discord Webhook URL", padding=10)
-        instructions.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        instructions_group = QGroupBox("ℹ️ How to get Discord Webhook URL")
+        instructions_layout = QVBoxLayout(instructions_group)
+        instructions_layout.setContentsMargins(20, 25, 20, 20)
         
-        instruction_text = """1. Go to your Discord server
+        instructions_text = QLabel("""1. Go to your Discord server
 2. Right-click on the channel where you want notifications
 3. Select "Edit Channel"
 4. Go to "Integrations" tab
 5. Click "Create Webhook"
-6. Copy the webhook URL and paste it above"""
+6. Copy the webhook URL and paste it above""")
+        instructions_text.setStyleSheet("color: #cccccc; font-size: 11px; line-height: 1.4;")
+        instructions_layout.addWidget(instructions_text)
         
-        ttk.Label(instructions, text=instruction_text, justify=tk.LEFT).pack(anchor=tk.W)
+        layout.addWidget(instructions_group)
+        layout.addStretch()
+        
+        self.tab_widget.addTab(scroll, "💬 Discord")
     
     def create_paths_tab(self):
         """Create paths configuration tab"""
-        paths_frame = ttk.Frame(self.settings_notebook)
-        self.settings_notebook.add(paths_frame, text="Paths")
+        paths_widget = QWidget()
+        layout = QVBoxLayout(paths_widget)
+        layout.setSpacing(20)
         
-        # Steam path
-        steam_path_frame = ttk.LabelFrame(paths_frame, text="Steam Installation", padding=10)
-        steam_path_frame.pack(fill=tk.X, padx=10, pady=10)
+        # Steam Path Section
+        steam_group = QGroupBox("🎮 Steam Installation")
+        steam_layout = QFormLayout(steam_group)
+        steam_layout.setSpacing(15)
+        steam_layout.setContentsMargins(15, 20, 15, 15)
         
-        ttk.Label(steam_path_frame, text="Steam Executable Path:").pack(anchor=tk.W)
+        steam_path_frame = QFrame()
+        steam_path_layout = QHBoxLayout(steam_path_frame)
+        steam_path_layout.setContentsMargins(0, 0, 0, 0)
         
-        path_frame = ttk.Frame(steam_path_frame)
-        path_frame.pack(fill=tk.X, pady=(5, 10))
+        self.steam_path_edit = QLineEdit()
+        steam_path_layout.addWidget(self.steam_path_edit)
         
-        self.steam_path_var = tk.StringVar()
-        steam_path_entry = ttk.Entry(path_frame, textvariable=self.steam_path_var, width=60)
-        steam_path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        ttk.Button(path_frame, text="Browse", command=self.browse_steam_path).pack(side=tk.RIGHT)
+        browse_btn = QPushButton("📁 Browse")
+        browse_btn.clicked.connect(self.browse_steam_path)
+        steam_path_layout.addWidget(browse_btn)
         
-        ttk.Button(steam_path_frame, text="Save", command=self.save_steam_path).pack(anchor=tk.W)
+        steam_layout.addRow("Steam Executable:", steam_path_frame)
         
-        # Legendary info
-        legendary_frame = ttk.LabelFrame(paths_frame, text="Epic Games (Legendary)", padding=10)
-        legendary_frame.pack(fill=tk.X, padx=10, pady=10)
+        save_path_btn = QPushButton("💾 Save")
+        save_path_btn.clicked.connect(self.save_steam_path)
+        steam_layout.addRow(save_path_btn)
         
-        legendary_text = """For Epic Games support, you need to install Legendary CLI:
+        layout.addWidget(steam_group)
+        
+        # Legendary Info Section
+        legendary_group = QGroupBox("🎯 Epic Games (Legendary)")
+        legendary_layout = QVBoxLayout(legendary_group)
+        
+        legendary_info = QLabel("""For Epic Games support, you need to install Legendary CLI:
 
 1. Download from: https://github.com/derrod/legendary
 2. Install using pip: pip install legendary-gl
 3. Configure authentication in API Keys tab
 4. The app will use legendary to import and launch Epic games
 
-Note: Authentication testing is available in the API Keys tab."""
+Note: Authentication testing is available in the API Keys tab.""")
+        legendary_info.setStyleSheet("color: #cccccc; font-size: 11px;")
+        legendary_layout.addWidget(legendary_info)
         
-        ttk.Label(legendary_frame, text=legendary_text, justify=tk.LEFT).pack(anchor=tk.W)
+        layout.addWidget(legendary_group)
+        layout.addStretch()
+        
+        self.tab_widget.addTab(paths_widget, "📂 Paths")
     
     def create_import_export_tab(self):
         """Create import/export configuration tab"""
-        ie_frame = ttk.Frame(self.settings_notebook)
-        self.settings_notebook.add(ie_frame, text="Import/Export")
+        ie_widget = QWidget()
+        layout = QVBoxLayout(ie_widget)
+        layout.setSpacing(20)
         
-        # Export settings
-        export_frame = ttk.LabelFrame(ie_frame, text="Export Settings", padding=10)
-        export_frame.pack(fill=tk.X, padx=10, pady=10)
+        # Export Section
+        export_group = QGroupBox("📤 Export Settings")
+        export_layout = QVBoxLayout(export_group)
         
-        ttk.Label(export_frame, text="Export all settings to a JSON file for backup:").pack(anchor=tk.W, pady=(0, 10))
-        ttk.Button(export_frame, text="Export Settings", command=self.export_settings).pack(anchor=tk.W)
+        export_info = QLabel("Export all settings to a JSON file for backup:")
+        export_layout.addWidget(export_info)
         
-        # Import settings
-        import_frame = ttk.LabelFrame(ie_frame, text="Import Settings", padding=10)
-        import_frame.pack(fill=tk.X, padx=10, pady=10)
+        export_btn = QPushButton("📤 Export Settings")
+        export_btn.clicked.connect(self.export_settings)
+        export_layout.addWidget(export_btn)
         
-        ttk.Label(import_frame, text="Import settings from a JSON backup file:").pack(anchor=tk.W, pady=(0, 10))
-        ttk.Button(import_frame, text="Import Settings", command=self.import_settings).pack(anchor=tk.W)
+        layout.addWidget(export_group)
         
-        # Database info
-        db_frame = ttk.LabelFrame(ie_frame, text="Database Information", padding=10)
-        db_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Import Section
+        import_group = QGroupBox("📥 Import Settings")
+        import_layout = QVBoxLayout(import_group)
         
-        db_info = f"""Database Location: {os.path.abspath(self.db.db_path)}
+        import_info = QLabel("Import settings from a JSON backup file:")
+        import_layout.addWidget(import_info)
+        
+        import_btn = QPushButton("📥 Import Settings")
+        import_btn.clicked.connect(self.import_settings)
+        import_layout.addWidget(import_btn)
+        
+        layout.addWidget(import_group)
+        
+        # Database Info Section
+        db_group = QGroupBox("🗄️ Database Information")
+        db_layout = QVBoxLayout(db_group)
+        
+        db_info = QLabel(f"""Database Location: {os.path.abspath(self.db.db_path)}
 
 The database contains:
-- RSS feeds and news items
-- Game library data
-- Tasks and to-do items
-- All configuration settings
+• RSS feeds and news items
+• Game library data
+• Tasks and to-do items
+• All configuration settings
 
-You can backup this file to preserve all your data."""
+You can backup this file to preserve all your data.""")
+        db_info.setStyleSheet("color: #cccccc; font-size: 11px;")
+        db_layout.addWidget(db_info)
         
-        ttk.Label(db_frame, text=db_info, justify=tk.LEFT).pack(anchor=tk.W)
+        layout.addWidget(db_group)
+        layout.addStretch()
+        
+        self.tab_widget.addTab(ie_widget, "💾 Import/Export")
     
     def load_settings(self):
         """Load settings from database"""
         # Load API keys
-        self.gemini_key_var.set(self.db.get_setting('gemini_api_key', ''))
-        self.gemini_model_var.set(self.db.get_setting('gemini_model', 'gemini-2.5-flash'))
-        self.steam_key_var.set(self.db.get_setting('steam_api_key', ''))
-        self.steam_id_var.set(self.db.get_setting('steam_id', ''))
-        self.epic_auth_var.set(self.db.get_setting('epic_auth_code', ''))
+        self.gemini_key_edit.setText(str(self.db.get_setting('gemini_api_key', '')))
+        self.gemini_model_combo.setCurrentText(str(self.db.get_setting('gemini_model', 'gemini-2.5-flash')))
+        self.steam_key_edit.setText(str(self.db.get_setting('steam_api_key', '')))
+        self.steam_id_edit.setText(str(self.db.get_setting('steam_id', '')))
+        self.epic_auth_edit.setText(str(self.db.get_setting('epic_auth_code', '')))
         
-        # Load Discord webhooks
-        self.webhook_url_var.set(self.db.get_setting('discord_webhook_url', ''))
-        self.task_webhook_url_var.set(self.db.get_setting('discord_task_webhook_url', ''))
-        self.discord_user_id_var.set(self.db.get_setting('discord_user_id', ''))
+        # Load Discord settings
+        self.news_webhook_edit.setText(str(self.db.get_setting('discord_webhook_url', '')))
+        self.task_webhook_edit.setText(str(self.db.get_setting('discord_task_webhook_url', '')))
+        self.discord_user_id_edit.setText(str(self.db.get_setting('discord_user_id', '')))
         
-        # Load auto-send settings
-        self.auto_send_news_var.set(self.db.get_setting('auto_send_news', 'true').lower() == 'true')
-        self.auto_task_reminders_var.set(self.db.get_setting('auto_task_reminders', 'true').lower() == 'true')
+        # Load auto settings
+        self.auto_send_news_check.setChecked(str(self.db.get_setting('auto_send_news', 'true')).lower() == 'true')
+        self.auto_task_reminders_check.setChecked(str(self.db.get_setting('auto_task_reminders', 'true')).lower() == 'true')
         
         # Load paths
         default_steam_path = r"C:\Program Files (x86)\Steam\steam.exe"
-        self.steam_path_var.set(self.db.get_setting('steam_path', default_steam_path))
-        
-        # Update quota display
-        self.update_quota_display()
+        self.steam_path_edit.setText(str(self.db.get_setting('steam_path', default_steam_path)))
     
     def save_gemini(self):
-        """Save Gemini API key and model"""
-        api_key = self.gemini_key_var.get().strip()
-        model = self.gemini_model_var.get().strip()
+        """Save Gemini API settings"""
+        api_key = self.gemini_key_edit.text().strip()
+        model = self.gemini_model_combo.currentText()
         
         if api_key and model:
             self.db.set_setting('gemini_api_key', api_key)
             self.db.set_setting('gemini_model', model)
-            messagebox.showinfo("Success", "Gemini API settings saved!")
+            show_toast(self, "✅ Gemini API settings saved!")
         else:
-            messagebox.showwarning("Warning", "Please enter an API key and select a model")
+            QMessageBox.warning(self, "Warning", "Please enter an API key and select a model")
     
     def test_gemini(self):
         """Test Gemini API connection"""
-        api_key = self.gemini_key_var.get().strip()
-        model_name = self.gemini_model_var.get().strip()
+        api_key = self.gemini_key_edit.text().strip()
+        model_name = self.gemini_model_combo.currentText()
         
         if not api_key or not model_name:
-            messagebox.showwarning("Warning", "Please enter an API key and select a model first")
+            QMessageBox.warning(self, "Warning", "Please enter an API key and select a model first")
             return
         
         def test_in_thread():
@@ -393,96 +591,32 @@ You can backup this file to preserve all your data."""
                 
                 response = model.generate_content("Hello, this is a test.")
                 
-                self.frame.after(0, lambda: messagebox.showinfo("Success", f"Gemini API connection successful!\nModel: {model_name}\nResponse: {response.text[:100]}..."))
+                show_toast(self, f"✅ Gemini API connection successful! Model: {model_name}")
                 
             except Exception as e:
-                self.frame.after(0, lambda: messagebox.showerror("Error", f"Gemini API test failed: {e}"))
+                QMessageBox.critical(self, "Error", f"Gemini API test failed: {e}")
         
-        import threading
         threading.Thread(target=test_in_thread, daemon=True).start()
-    
-    def update_quota_display(self, event=None):
-        """Update the quota display based on selected model"""
-        model_key = self.gemini_model_var.get()
-        if model_key in self.gemini_models:
-            model_info = self.gemini_models[model_key]
-            quota_text = f"Quota Limits - RPM: {model_info['rpm']}, TPM: {model_info['tpm']}, RPD: {model_info['rpd']}"
-            
-            # Add usage estimation
-            rpm = model_info['rpm']
-            if rpm != "Unlimited" and rpm != "N/A":
-                try:
-                    rpm_int = int(rpm)
-                    hourly_limit = rpm_int * 60
-                    daily_limit = min(hourly_limit * 24, int(model_info['rpd']) if model_info['rpd'] not in ["Unlimited", "N/A"] else hourly_limit * 24)
-                    quota_text += f"\nEstimated Usage: ~{hourly_limit} requests/hour, ~{daily_limit} requests/day"
-                except:
-                    pass
-            
-            self.quota_label.config(text=quota_text)
-            
-            # Update usage statistics
-            self.update_usage_display(model_key)
-        else:
-            self.quota_label.config(text="")
-            self.usage_label.config(text="")
-    
-    def update_usage_display(self, model_key):
-        """Update the usage display with current statistics"""
-        try:
-            stats = self.db.get_api_usage_stats('gemini', model_key)
-            usage_text = f"Current Usage - Last Hour: {stats['hour']}, Last 24h: {stats['day']}, Total: {stats['total']}"
-            
-            # Calculate remaining quota if applicable
-            if model_key in self.gemini_models:
-                model_info = self.gemini_models[model_key]
-                rpm = model_info['rpm']
-                rpd = model_info['rpd']
-                
-                if rpm not in ["Unlimited", "N/A"] and rpd not in ["Unlimited", "N/A"]:
-                    try:
-                        rpm_int = int(rpm)
-                        rpd_int = int(rpd.replace('K', '000').replace('M', '000000'))
-                        
-                        # Calculate remaining for today
-                        remaining_daily = max(0, rpd_int - stats['day'])
-                        usage_text += f"\nRemaining Today: {remaining_daily} requests"
-                        
-                        # Warning if approaching limits
-                        if stats['day'] > rpd_int * 0.8:  # 80% of daily limit
-                            usage_text += " ⚠️ Approaching daily limit!"
-                        elif stats['hour'] > rpm_int * 0.8:  # 80% of per-minute limit
-                            usage_text += " ⚠️ High usage rate!"
-                    except:
-                        pass
-            
-            self.usage_label.config(text=usage_text)
-        except Exception as e:
-            self.usage_label.config(text=f"Usage tracking error: {e}")
-    
-    def refresh_usage(self):
-        """Refresh the usage statistics display"""
-        self.update_quota_display()
     
     def save_steam(self):
         """Save Steam API settings"""
-        api_key = self.steam_key_var.get().strip()
-        steam_id = self.steam_id_var.get().strip()
+        api_key = self.steam_key_edit.text().strip()
+        steam_id = self.steam_id_edit.text().strip()
         
         if api_key and steam_id:
             self.db.set_setting('steam_api_key', api_key)
             self.db.set_setting('steam_id', steam_id)
-            messagebox.showinfo("Success", "Steam API settings saved!")
+            show_toast(self, "✅ Steam API settings saved!")
         else:
-            messagebox.showwarning("Warning", "Please enter both API key and Steam ID")
+            QMessageBox.warning(self, "Warning", "Please enter both API key and Steam ID")
     
     def test_steam(self):
         """Test Steam API connection"""
-        api_key = self.steam_key_var.get().strip()
-        steam_id = self.steam_id_var.get().strip()
+        api_key = self.steam_key_edit.text().strip()
+        steam_id = self.steam_id_edit.text().strip()
         
         if not api_key or not steam_id:
-            messagebox.showwarning("Warning", "Please enter both API key and Steam ID first")
+            QMessageBox.warning(self, "Warning", "Please enter both API key and Steam ID first")
             return
         
         def test_in_thread():
@@ -500,183 +634,84 @@ You can backup this file to preserve all your data."""
                 
                 if 'response' in data:
                     game_count = len(data['response'].get('games', []))
-                    self.frame.after(0, lambda: messagebox.showinfo("Success", 
-                        f"Steam API connection successful! Found {game_count} games."))
+                    show_toast(self, f"✅ Steam API connection successful! Found {game_count} games.")
                 else:
-                    self.frame.after(0, lambda: messagebox.showerror("Error", 
-                        "Steam API test failed: Invalid response"))
+                    QMessageBox.critical(self, "Error", "Steam API test failed: Invalid response")
                 
             except Exception as e:
-                self.frame.after(0, lambda: messagebox.showerror("Error", f"Steam API test failed: {e}"))
+                QMessageBox.critical(self, "Error", f"Steam API test failed: {e}")
         
-        import threading
         threading.Thread(target=test_in_thread, daemon=True).start()
     
     def get_epic_auth(self):
         """Open Epic Games login page"""
-        import webbrowser
-        auth_url = "https://legendary.gl/epiclogin"
-        webbrowser.open(auth_url)
-        messagebox.showinfo("Epic Games Login", 
-                           "1. Complete the Epic Games login in your browser\n"
-                           "2. Copy the 'authorizationCode' value from the JSON response\n"
-                           "3. Paste it in the Authorization Code field above\n"
-                           "4. Click 'Save'")
+        webbrowser.open("https://legendary.gl/epiclogin")
+        QMessageBox.information(self, "Epic Games Login", 
+                               "1. Complete the Epic Games login in your browser\n"
+                               "2. Copy the 'authorizationCode' value from the JSON response\n"
+                               "3. Paste it in the Authorization Code field above\n"
+                               "4. Click 'Save'")
     
     def save_epic(self):
         """Save Epic Games authorization code"""
-        auth_code = self.epic_auth_var.get().strip()
+        auth_code = self.epic_auth_edit.text().strip()
         if auth_code:
             self.db.set_setting('epic_auth_code', auth_code)
-            messagebox.showinfo("Success", "Epic Games authorization code saved!")
+            show_toast(self, "✅ Epic Games authorization code saved!")
         else:
-            messagebox.showwarning("Warning", "Please enter the authorization code")
+            QMessageBox.warning(self, "Warning", "Please enter the authorization code")
     
     def test_epic(self):
         """Test Epic Games connection using legendary"""
-        auth_code = self.epic_auth_var.get().strip()
+        auth_code = self.epic_auth_edit.text().strip()
         if not auth_code:
-            messagebox.showwarning("Warning", "Please enter and save the authorization code first")
+            QMessageBox.warning(self, "Warning", "Please enter and save the authorization code first")
             return
         
         def test_in_thread():
             try:
                 import subprocess
-                # Test legendary connection
                 result = subprocess.run(['legendary', 'list'], capture_output=True, text=True, 
                                        encoding='utf-8', errors='ignore', timeout=30)
                 
                 if result.returncode == 0:
-                    # Count games in output
                     lines = result.stdout.split('\n')
                     game_count = 0
                     for line in lines:
                         if '|' in line and not line.startswith('Legendary'):
                             game_count += 1
                     
-                    self.frame.after(0, lambda: messagebox.showinfo("Success", 
-                        f"Epic Games connection successful! Found {game_count} games."))
+                    show_toast(self, f"✅ Epic Games connection successful! Found {game_count} games.")
                 else:
                     error_msg = result.stderr or result.stdout or "Unknown error"
-                    self.frame.after(0, lambda: messagebox.showerror("Error", 
-                        f"Epic Games test failed: {error_msg[:200]}"))
+                    QMessageBox.critical(self, "Error", f"Epic Games test failed: {error_msg[:200]}")
                         
             except FileNotFoundError:
-                self.frame.after(0, lambda: messagebox.showerror("Error", 
-                    "Legendary CLI not found. Please install legendary first:\npip install legendary-gl"))
+                QMessageBox.critical(self, "Error", "Legendary CLI not found. Please install legendary first:\npip install legendary-gl")
             except Exception as e:
-                error_msg = str(e)
-                self.frame.after(0, lambda msg=error_msg: messagebox.showerror("Error", f"Epic Games test failed: {msg}"))
+                QMessageBox.critical(self, "Error", f"Epic Games test failed: {e}")
         
-        import threading
         threading.Thread(target=test_in_thread, daemon=True).start()
     
     def save_webhook(self):
-        """Save Discord webhook URL"""
-        webhook_url = self.webhook_url_var.get().strip()
+        """Save Discord news webhook URL"""
+        webhook_url = self.news_webhook_edit.text().strip()
         if webhook_url:
             self.db.set_setting('discord_webhook_url', webhook_url)
-            messagebox.showinfo("Success", "Discord webhook URL saved!")
+            show_toast(self, "✅ Discord webhook URL saved!")
         else:
-            messagebox.showwarning("Warning", "Please enter a webhook URL")
-    
-    def save_discord_user_id(self):
-        """Save Discord user ID for pings"""
-        user_id = self.discord_user_id_var.get().strip()
-        if user_id:
-            # Validate that it's a valid Discord user ID (should be numeric and 17-19 digits)
-            if user_id.isdigit() and 17 <= len(user_id) <= 19:
-                self.db.set_setting('discord_user_id', user_id)
-                messagebox.showinfo("Success", "Discord User ID saved!")
-            else:
-                messagebox.showwarning("Warning", "Invalid Discord User ID. Should be 17-19 digits.")
-        else:
-            messagebox.showwarning("Warning", "Please enter your Discord User ID")
-    
-    def save_task_webhook(self):
-        """Save Discord task webhook URL"""
-        webhook_url = self.task_webhook_url_var.get().strip()
-        if webhook_url:
-            self.db.set_setting('discord_task_webhook_url', webhook_url)
-            messagebox.showinfo("Success", "Discord task webhook URL saved!")
-        else:
-            messagebox.showwarning("Warning", "Please enter a task webhook URL")
-    
-    def test_task_webhook(self):
-        """Test Discord task webhook"""
-        webhook_url = self.task_webhook_url_var.get().strip()
-        if not webhook_url:
-            messagebox.showwarning("Warning", "Please enter a task webhook URL first")
-            return
-        
-        def test_in_thread():
-            try:
-                # Get Discord user ID for ping test
-                discord_user_id = self.discord_user_id_var.get().strip()
-                ping_text = f"<@{discord_user_id}> " if discord_user_id else ""
-                
-                payload = {
-                    "username": "Task Reminder Test",
-                    "content": f"{ping_text}⏰ This is a test message for task reminders from your Personal Dashboard!"
-                }
-                
-                response = requests.post(webhook_url, json=payload, timeout=10)
-                response.raise_for_status()
-                
-                ping_status = " (with ping)" if discord_user_id else " (no ping - add User ID for pings)"
-                self.frame.after(0, lambda: messagebox.showinfo("Success", f"Discord task webhook test successful{ping_status}!"))
-                
-            except Exception as e:
-                self.frame.after(0, lambda: messagebox.showerror("Error", f"Discord task webhook test failed: {e}"))
-        
-        import threading
-        threading.Thread(target=test_in_thread, daemon=True).start()
-    
-    def test_auto_reminders(self):
-        """Test the automatic task reminder system"""
-        def test_in_thread():
-            try:
-                # Import scheduler here to avoid circular imports
-                from modules.scheduler import SchedulerManager
-                
-                # Create a temporary scheduler instance for testing
-                temp_scheduler = SchedulerManager(self.db)
-                
-                # Test the task reminders
-                task_count = temp_scheduler.test_task_reminders()
-                
-                if task_count > 0:
-                    self.frame.after(0, lambda: messagebox.showinfo("Success", 
-                        f"Auto-reminder test successful!\n"
-                        f"Sent reminders for {task_count} due tasks.\n\n"
-                        f"This is how automatic daily reminders at 9 AM will work."))
-                else:
-                    self.frame.after(0, lambda: messagebox.showinfo("Info", 
-                        "Auto-reminder test completed.\n"
-                        "No tasks are currently due for reminders."))
-                
-            except Exception as e:
-                self.frame.after(0, lambda: messagebox.showerror("Error", f"Auto-reminder test failed: {e}"))
-        
-        import threading
-        threading.Thread(target=test_in_thread, daemon=True).start()
-    
-    def save_auto_settings(self):
-        """Save automatic notification settings"""
-        self.db.set_setting('auto_send_news', str(self.auto_send_news_var.get()).lower())
-        self.db.set_setting('auto_task_reminders', str(self.auto_task_reminders_var.get()).lower())
+            QMessageBox.warning(self, "Warning", "Please enter a webhook URL")
     
     def test_webhook(self):
-        """Test Discord webhook"""
-        webhook_url = self.webhook_url_var.get().strip()
+        """Test Discord news webhook"""
+        webhook_url = self.news_webhook_edit.text().strip()
         if not webhook_url:
-            messagebox.showwarning("Warning", "Please enter a webhook URL first")
+            QMessageBox.warning(self, "Warning", "Please enter a webhook URL first")
             return
         
         def test_in_thread():
             try:
-                # Get Discord user ID for ping test
-                discord_user_id = self.discord_user_id_var.get().strip()
+                discord_user_id = self.discord_user_id_edit.text().strip()
                 ping_text = f"<@{discord_user_id}> " if discord_user_id else ""
                 
                 payload = {
@@ -688,79 +723,138 @@ You can backup this file to preserve all your data."""
                 response.raise_for_status()
                 
                 ping_status = " (with ping)" if discord_user_id else " (no ping - add User ID for pings)"
-                self.frame.after(0, lambda: messagebox.showinfo("Success", f"Discord webhook test successful{ping_status}!"))
+                show_toast(self, f"✅ Discord webhook test successful{ping_status}!")
                 
             except Exception as e:
-                self.frame.after(0, lambda: messagebox.showerror("Error", f"Discord webhook test failed: {e}"))
+                QMessageBox.critical(self, "Error", f"Discord webhook test failed: {e}")
         
-        import threading
         threading.Thread(target=test_in_thread, daemon=True).start()
+    
+    def save_task_webhook(self):
+        """Save Discord task webhook URL"""
+        webhook_url = self.task_webhook_edit.text().strip()
+        if webhook_url:
+            self.db.set_setting('discord_task_webhook_url', webhook_url)
+            show_toast(self, "✅ Discord task webhook URL saved!")
+        else:
+            QMessageBox.warning(self, "Warning", "Please enter a task webhook URL")
+    
+    def test_task_webhook(self):
+        """Test Discord task webhook"""
+        webhook_url = self.task_webhook_edit.text().strip()
+        if not webhook_url:
+            QMessageBox.warning(self, "Warning", "Please enter a task webhook URL first")
+            return
+        
+        def test_in_thread():
+            try:
+                discord_user_id = self.discord_user_id_edit.text().strip()
+                ping_text = f"<@{discord_user_id}> " if discord_user_id else ""
+                
+                payload = {
+                    "username": "Task Reminder Test",
+                    "content": f"{ping_text}⏰ This is a test message for task reminders from your Personal Dashboard!"
+                }
+                
+                response = requests.post(webhook_url, json=payload, timeout=10)
+                response.raise_for_status()
+                
+                ping_status = " (with ping)" if discord_user_id else " (no ping - add User ID for pings)"
+                show_toast(self, f"✅ Discord task webhook test successful{ping_status}!")
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Discord task webhook test failed: {e}")
+        
+        threading.Thread(target=test_in_thread, daemon=True).start()
+    
+    def test_auto_reminders(self):
+        """Test the automatic task reminder system"""
+        def test_in_thread():
+            try:
+                from modules.scheduler import SchedulerManager
+                temp_scheduler = SchedulerManager(self.db)
+                task_count = temp_scheduler.test_task_reminders()
+                
+                if task_count > 0:
+                    QMessageBox.information(self, "Success", 
+                        f"Auto-reminder test successful!\n"
+                        f"Sent reminders for {task_count} due tasks.\n\n"
+                        f"This is how automatic daily reminders at 9 AM will work.")
+                else:
+                    QMessageBox.information(self, "Info", 
+                        "Auto-reminder test completed.\n"
+                        "No tasks are currently due for reminders.")
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Auto-reminder test failed: {e}")
+        
+        threading.Thread(target=test_in_thread, daemon=True).start()
+    
+    def save_discord_user_id(self):
+        """Save Discord user ID"""
+        user_id = self.discord_user_id_edit.text().strip()
+        if user_id:
+            if user_id.isdigit() and 17 <= len(user_id) <= 19:
+                self.db.set_setting('discord_user_id', user_id)
+                show_toast(self, "✅ Discord User ID saved!")
+            else:
+                QMessageBox.warning(self, "Warning", "Invalid Discord User ID. Should be 17-19 digits.")
+        else:
+            QMessageBox.warning(self, "Warning", "Please enter your Discord User ID")
+    
+    def save_auto_settings(self):
+        """Save automatic notification settings"""
+        self.db.set_setting('auto_send_news', str(self.auto_send_news_check.isChecked()).lower())
+        self.db.set_setting('auto_task_reminders', str(self.auto_task_reminders_check.isChecked()).lower())
     
     def browse_steam_path(self):
         """Browse for Steam executable"""
-        filename = filedialog.askopenfilename(
-            title="Select Steam Executable",
-            filetypes=[("Executable files", "*.exe"), ("All files", "*.*")],
-            initialdir="C:\\Program Files (x86)\\Steam\\"
-        )
-        if filename:
-            self.steam_path_var.set(filename)
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select Steam Executable", 
+                                                  r"C:\Program Files (x86)\Steam", 
+                                                  "Executable files (*.exe)")
+        if file_path:
+            self.steam_path_edit.setText(file_path)
     
     def save_steam_path(self):
         """Save Steam path"""
-        steam_path = self.steam_path_var.get().strip()
+        steam_path = self.steam_path_edit.text().strip()
         if steam_path:
             self.db.set_setting('steam_path', steam_path)
-            messagebox.showinfo("Success", "Steam path saved!")
+            show_toast(self, "✅ Steam path saved!")
         else:
-            messagebox.showwarning("Warning", "Please enter a Steam path")
-    
+            QMessageBox.warning(self, "Warning", "Please enter a Steam path")
     
     def export_settings(self):
         """Export all settings to JSON file"""
-        filename = filedialog.asksaveasfilename(
-            title="Export Settings",
-            defaultextension=".json",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
-        )
-        
-        if filename:
+        file_path, _ = QFileDialog.getSaveFileName(self, "Export Settings", 
+                                                  "dashboard_settings.json", 
+                                                  "JSON files (*.json)")
+        if file_path:
             try:
-                # Get all settings from database
                 cursor = self.db.conn.cursor()
                 cursor.execute("SELECT key, value FROM settings")
                 settings = {row['key']: row['value'] for row in cursor.fetchall()}
                 
-                # Export to JSON file
-                with open(filename, 'w') as f:
+                with open(file_path, 'w') as f:
                     json.dump(settings, f, indent=2)
                 
-                messagebox.showinfo("Success", f"Settings exported to {filename}")
-                
+                show_toast(self, f"✅ Settings exported to {file_path}")
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to export settings: {e}")
+                QMessageBox.critical(self, "Error", f"Failed to export settings: {e}")
     
     def import_settings(self):
         """Import settings from JSON file"""
-        filename = filedialog.askopenfilename(
-            title="Import Settings",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
-        )
-        
-        if filename:
+        file_path, _ = QFileDialog.getOpenFileName(self, "Import Settings", 
+                                                  "", "JSON files (*.json)")
+        if file_path:
             try:
-                # Load settings from JSON file
-                with open(filename, 'r') as f:
+                with open(file_path, 'r') as f:
                     settings = json.load(f)
                 
-                # Import each setting
                 for key, value in settings.items():
                     self.db.set_setting(key, value)
                 
-                # Reload settings in UI
                 self.load_settings()
-                
-                messagebox.showinfo("Success", f"Settings imported from {filename}")
-                
+                show_toast(self, f"✅ Settings imported from {file_path}")
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to import settings: {e}")
+                QMessageBox.critical(self, "Error", f"Failed to import settings: {e}")
